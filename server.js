@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 
-// --- Upload (pamięć; limit 12 plików po 10MB) ---
+// --- Upload (memory; max 12 plików po 10MB) ---
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 12 },
@@ -29,12 +29,12 @@ const pool = new Pool({
     : { rejectUnauthorized: false },
 });
 
-// --- App config ---
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// katalog publiczny (wrzuć tam oferty.html jako "public/oferty.html")
+// ---- STATIC ----
+// UWAGA: pliki index.html, oferty.html itp. muszą być w ./public
 app.use(express.static(path.join(__dirname, "public")));
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Klaudia0050";
@@ -186,7 +186,7 @@ app.post("/api/listings", requireAdmin, upload.array("images", 12), async (req, 
   }
 });
 
-// --- Update (add new images, optionally remove some) ---
+// --- Update ---
 app.put("/api/listings/:id", requireAdmin, upload.array("images", 12), async (req, res) => {
   const { id } = req.params;
   const {
@@ -252,11 +252,16 @@ app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// --- SPA routing (klient + panel) ---
-app.get(["/oferty.html", "/"], (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "oferty.html"));
+// --- Health (dla Railway) ---
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+// --- ROUTING HTML ---
+// / -> index.html
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
-app.get("/panel", (_req, res) => {
+// /oferty.html i /panel -> oferty.html
+app.get(["/oferty.html", "/panel"], (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "oferty.html"));
 });
 
