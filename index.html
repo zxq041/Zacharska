@@ -13,287 +13,460 @@
     body { font-family: 'Inter', sans-serif; }
     .scrollbar-none::-webkit-scrollbar { display: none; }
     .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
-    .line-button{align-items:center;background-color:#2563eb;color:#fff;cursor:pointer;display:inline-flex;font-family:ui-sans-serif,system-ui,-apple-system,system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";font-size:1rem;font-weight:600;line-height:1.5;text-decoration:none;text-transform:uppercase;letter-spacing:.05em;outline:0;border:0;padding:1rem 2rem;border-radius:9999px;transition:background-color .3s ease-in-out}
-    .line-button:before{background-color:#fff;content:"";display:inline-block;height:2px;margin-right:12px;transition:all .42s cubic-bezier(.25,.8,.25,1);width:0}
-    .line-button:hover{background-color:#1d4ed8}
-    .line-button:hover:before{background-color:#fff;width:2.5rem}
+    .line-button{align-items:center;background:#2563eb;color:#fff;cursor:pointer;display:inline-flex;font-weight:600;letter-spacing:.05em;border:0;padding:1rem 2rem;border-radius:9999px;transition:.3s}
+    .line-button:before{background:#fff;content:"";display:inline-block;height:2px;margin-right:12px;transition:all .42s cubic-bezier(.25,.8,.25,1);width:0}
+    .line-button:hover{background:#1d4ed8}
+    .line-button:hover:before{width:2.5rem}
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useEffect, useRef, useState } = React;
+  const { useEffect, useRef, useState } = React;
 
-    // ---------- UTILITIES ----------
-    const cn = (...classes) => classes.filter(Boolean).join(' ');
-    const currency = (n) => new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 }).format(n);
-    const useLocalStorage = (key, initial) => {
-      const [state, setState] = useState(() => {
-        try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : initial } catch { return initial }
-      });
-      useEffect(() => { try { localStorage.setItem(key, JSON.stringify(state)) } catch {} }, [key, state]);
-      return [state, setState];
+  // ---------- CONFIG ----------
+  const API_URL = "/api/listings?limit=9"; // backend sortuje po najnowszych
+
+  // ---------- UTILITIES ----------
+  const cn = (...cls) => cls.filter(Boolean).join(" ");
+  const currency = (n) =>
+    new Intl.NumberFormat("pl-PL", {
+      style: "currency",
+      currency: "PLN",
+      maximumFractionDigits: 0
+    }).format(Number(n||0));
+  const useLocalStorage = (key, initial) => {
+    const [state, setState] = useState(() => {
+      try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : initial } catch { return initial }
+    });
+    useEffect(() => { try { localStorage.setItem(key, JSON.stringify(state)) } catch {} }, [key, state]);
+    return [state, setState];
+  };
+  const firstImageUrl = (item) => {
+    if (item?.cover_url) return item.cover_url;
+    if (Array.isArray(item?.images) && item.images[0]?.url) return item.images[0].url;
+    return "https://images.unsplash.com/photo-1494526585095-c41746248156?q=80&w=1600&auto=format&fit=crop"; // placeholder
+  };
+  const getField = (o, keys, fallback="") => {
+    for (const k of keys) if (o?.[k] !== undefined && o?.[k] !== null) return o[k];
+    return fallback;
+  };
+
+  // ---------- ICONS ----------
+  const Icon = ({ name, className }) => {
+    const icons = {
+      MapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></>,
+      Phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
+      Mail: <><rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></>,
+      Menu: <><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></>,
+      Star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
+      Heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
+      ChevronLeft: <path d="m15 18-6-6 6-6" />,
+      ChevronRight: <path d="m9 18 6-6-6-6" />,
+      Languages: <><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></>,
+      LogIn: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" /></>,
+      LogOut: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></>,
+      UserPlus: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" x2="19" y1="8" y2="14" /><line x1="22" x2="16" y1="11" y2="11" /></>,
+      Loader2: <path d="M21 12a9 9 0 1 1-6.219-8.56" />,
+      MapMarker: <path d="M12 21s-6-4.5-6-10a6 6 0 1 1 12 0c0 5.5-6 10-6 10z"/>
     };
+    return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("h-4 w-4", className)}>{icons[name]}</svg>;
+  };
 
-    // API helpers
-    const api = {
-      async list(params={}) {
-        const q = new URLSearchParams(params).toString();
-        const r = await fetch(`/api/listings${q?`?${q}`:""}`); return r.json();
-      },
-      imageUrl(id){ return `/api/images/${id}`; }
+  // ---------- UI ----------
+  const Button = ({ variant='default', size='default', className, children, ...props }) => {
+    const variants = {
+      default: "bg-blue-600 text-white hover:bg-blue-700",
+      outline: "border border-zinc-200 bg-transparent hover:bg-blue-50",
+      secondary: "bg-blue-100 text-blue-800 hover:bg-blue-200",
+      ghost: "hover:bg-blue-100",
+      link: "text-blue-600 underline-offset-4 hover:underline"
     };
+    const sizes = { default:"h-10 px-4 py-2", sm:"h-9 rounded-md px-3", lg:"h-11 rounded-md px-8", icon:"h-10 w-10" };
+    return <button className={cn("inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none", variants[variant], sizes[size], className)} {...props}>{children}</button>;
+  };
+  const Card = ({ className, children }) => <div className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}>{children}</div>;
+  const CardHeader = ({ className, children }) => <div className={cn("flex flex-col space-y-1.5 p-6", className)}>{children}</div>;
+  const CardTitle = ({ className, children }) => <h3 className={cn("text-2xl font-semibold leading-none tracking-tight", className)}>{children}</h3>;
+  const CardContent = ({ className, children }) => <div className={cn("p-6 pt-0", className)}>{children}</div>;
+  const Input = ({ className, ...props }) => <input className={cn("flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50", className)} {...props} />;
 
-    // ---------- ICONS ----------
-    const Icon = ({ name, className }) => {
-      const icons = {
-        MapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
-        Phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
-        Mail: <><rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></>,
-        Menu: <><line x1="4" x2="20" y1="12" y2="12" /><line x1="4" x2="20" y1="6" y2="6" /><line x1="4" x2="20" y1="18" y2="18" /></>,
-        Star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
-        Heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
-        ChevronLeft: <path d="m15 18-6-6 6-6" />,
-        ChevronRight: <path d="m9 18 6-6-6-6" />,
-        Facebook: <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" />,
-        Instagram: <><rect width="20" height="20" x="2" y="2" rx="5" ry="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" x2="17.51" y1="6.5" y2="6.5" /></>,
-        Youtube: <><path d="M2.5 17a24.12 24.12 0 0 1 0-10C2.5 4.24 4.24 2.5 7 2.5h10c2.76 0 4.5 1.74 4.5 4.5s0 10 0 10c0 2.76-1.74 4.5-4.5 4.5H7c-2.76 0-4.5-1.74-4.5-4.5Z" /><path d="m10 15 5-3-5-3z" /></>,
-        Languages: <><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></>,
-        LogIn: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" /></>,
-        LogOut: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></>,
-        UserPlus: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" x2="19" y1="8" y2="14" /><line x1="22" x2="16" y1="11" y2="11" /></>,
-        Loader2: <path d="M21 12a9 9 0 1 1-6.219-8.56" />,
-      };
-      return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("h-4 w-4", className)}>{icons[name]}</svg>;
-    };
+  // ---------- I18N ----------
+  const dict = {
+    pl: { nav: ["Oferty", "O nas", "Opinie", "Kontakt"], cta:"Umów spotkanie", heroTitle:"Znajdź swoje wymarzone miejsce z nami", heroCTA:"Przeglądaj oferty", bestOffers:"Najlepsze propozycje", shorts:"Wideo | Reels", about:"O nas", story:"Od lat łączymy ludzi z nieruchomościami premium. Zespół doświadczonych doradców, nowoczesne narzędzia i pełna transparentność.", values:["Zaufanie","Profesjonalizm","Doświadczenie","Innowacja"], testimonials:"Opinie klientów", contact:"Kontakt", allOffers:"Wszystkie Oferty", form:{ name:"Imię i nazwisko", email:"Email", msg:"Wiadomość", send:"Wyślij", phone:"Numer telefonu", subject:"Temat wiadomości", consent:"Wyrażam zgodę na przetwarzanie moich danych osobowych." } },
+    en: { nav: ["Listings","About","Reviews","Contact"], cta:"Book a meeting", heroTitle:"Find your dream place with us", heroCTA:"Browse listings", bestOffers:"Top picks", shorts:"Video | Reels", about:"About us", story:"For years we’ve been connecting people with premium properties. Expert advisors, modern tools and full transparency.", values:["Trust","Professionalism","Experience","Innovation"], testimonials:"Client reviews", contact:"Contact", allOffers:"All Listings", form:{ name:"Full name", email:"Email", msg:"Message", send:"Send", phone:"Phone number", subject:"Subject", consent:"I agree to the processing of my personal data." } }
+  };
 
-    // ---------- UI ----------
-    const Button = ({ variant = 'default', size = 'default', className, children, ...props }) => {
-      const variants = { 
-        default: "bg-blue-600 text-white hover:bg-blue-700",
-        destructive: "bg-red-500 text-white hover:bg-red-600", 
-        outline: "border border-zinc-200 bg-transparent hover:bg-blue-50",
-        secondary: "bg-blue-100 text-blue-800 hover:bg-blue-200",
-        ghost: "hover:bg-blue-100",
-        link: "text-blue-600 underline-offset-4 hover:underline",
-      };
-      const sizes = { default: "h-10 px-4 py-2", sm: "h-9 rounded-md px-3", lg: "h-11 rounded-md px-8", icon: "h-10 w-10", };
-      return <button className={cn("inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none", variants[variant], sizes[size], className)} {...props}>{children}</button>;
-    };
-    const Card = ({ className, children }) => <div className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}>{children}</div>;
-    const CardHeader = ({ className, children }) => <div className={cn("flex flex-col space-y-1.5 p-6", className)}>{children}</div>;
-    const CardTitle = ({ className, children }) => <h3 className={cn("text-2xl font-semibold leading-none tracking-tight", className)}>{children}</h3>;
-    const CardContent = ({ className, children }) => <div className={cn("p-6 pt-0", className)}>{children}</div>;
-    const Input = ({ className, ...props }) => <input className={cn("flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50", className)} {...props} />;
+  // ---------- APP ----------
+  function App(){
+    const [lang, setLang] = useState("pl");
+    const t = dict[lang];
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [authed, setAuthed] = useLocalStorage("auth", { logged:false, name:"" });
+    const [favs, setFavs] = useLocalStorage("favs", []);
+    const [listings, setListings] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
 
-    // ---------- TEXTS ----------
-    const dict = {
-      pl: { nav: ["Oferty", "O nas", "Opinie", "Kontakt"], cta: "Umów spotkanie", heroTitle: "Znajdź swoje wymarzone miejsce z nami", heroCTA: "Przeglądaj oferty", bestOffers: "Najlepsze propozycje", shorts: "Wideo | Reels", about: "O nas", story: "Od lat łączymy ludzi z nieruchomościami premium. Zespół doświadczonych doradców, nowoczesne narzędzia i pełna transparentność.", values: ["Zaufanie", "Profesjonalizm", "Doświadczenie", "Innowacja"], testimonials: "Opinie klientów", contact: "Kontakt", allOffers: "Wszystkie Oferty", form: { name: "Imię i nazwisko", email: "Email", msg: "Wiadomość", send: "Wyślij", phone: "Numer telefonu", subject: "Temat wiadomości", consent: "Wyrażam zgodę na przetwarzanie moich danych osobowych." }, login: { login: "Zaloguj", register: "Rejestracja" } },
-      en: { nav: ["Listings", "About", "Reviews", "Contact"], cta: "Book a meeting", heroTitle: "Find your dream place with us", heroCTA: "Browse listings", bestOffers: "Top picks", shorts: "Video | Reels", about: "About us", story: "For years we’ve been connecting people with premium properties. Expert advisors, modern tools and full transparency.", values: ["Trust", "Professionalism", "Experience", "Innovation"], testimonials: "Client reviews", contact: "Contact", allOffers: "All Listings", form: { name: "Full name", email: "Email", msg: "Message", send: "Send", phone: "Phone number", subject: "Subject", consent: "I agree to the processing of my personal data." }, login: { login: "Login", register: "Register" } }
-    };
+    useEffect(() => {
+      let alive = true;
+      setLoading(true);
+      fetch(API_URL)
+        .then(r => { if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+        .then(data => { if(alive) { setListings(Array.isArray(data) ? data : []); setError(""); } })
+        .catch(e => { console.error(e); if(alive) setError("Nie udało się pobrać ogłoszeń."); })
+        .finally(() => alive && setLoading(false));
+      return () => alive = false;
+    }, []);
 
-    // ---------- APP ----------
-    function App() {
-      const [lang, setLang] = useState("pl");
-      const t = dict[lang];
-      const [menuOpen, setMenuOpen] = useState(false);
-      const [authed, setAuthed] = useLocalStorage("auth", { logged: false, name: "" });
-      const [favs, setFavs] = useLocalStorage("favs", []);
-      const toggleFav = (id) => setFavs((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    const toggleFav = (id) =>
+      setFavs(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-      return (
-        <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50 text-zinc-900 selection:bg-blue-200 selection:text-blue-900">
-          <Header t={t} lang={lang} setLang={setLang} authed={authed} setAuthed={setAuthed} menuOpen={menuOpen} setMenuOpen={setMenuOpen} />
-          <main>
-            <Hero t={t} />
-            <BestOffers t={t} favs={favs} toggleFav={toggleFav} />
-            <Shorts t={t} />
-            <About t={t} />
-            <Testimonials t={t} />
-            <Contact t={t} />
-          </main>
-          <Footer />
-        </div>
-      );
-    }
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50 text-zinc-900 selection:bg-blue-200 selection:text-blue-900">
+        <Header t={t} lang={lang} setLang={setLang} authed={authed} setAuthed={setAuthed} menuOpen={menuOpen} setMenuOpen={setMenuOpen}/>
+        <main>
+          <Hero t={t}/>
+          <BestOffers t={t} favs={favs} toggleFav={toggleFav} listings={listings} loading={loading} error={error}/>
+          <Shorts t={t}/>
+          <About t={t}/>
+          <Testimonials t={t}/>
+          <Contact t={t}/>
+        </main>
+        <Footer/>
+      </div>
+    );
+  }
 
-    // ---------- HEADER ----------
-    function Header({ lang, setLang, t, authed, setAuthed, menuOpen, setMenuOpen }) {
-      return (
-        <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/60 border-b border-zinc-200/70">
-          <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
-            <a href="index.html" className="flex items-center gap-3">
-              <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-12 w-12" />
-              <div>
-                <div className="font-semibold tracking-tight">Centrum nieruchomości</div>
-                <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
-              </div>
-            </a>
-            <nav className="hidden md:flex items-center gap-6 text-sm">
-              {t.nav.map((item, index) => (
-                <a key={index} href={`#${['offers', 'about', 'testimonials', 'contact'][index]}`} className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{item}</a>
-              ))}
-              <a href="oferty.html">
-                <Button variant="secondary" className="shadow-sm">{t.allOffers}</Button>
-              </a>
-              <LangToggle lang={lang} setLang={setLang} />
-            </nav>
-            <div className="md:hidden flex items-center gap-2">
-              <LangToggle lang={lang} setLang={setLang} />
-              <Button variant="outline" size="icon" className="rounded-xl" onClick={() => setMenuOpen(!menuOpen)}><Icon name="Menu" className="h-5 w-5"/></Button>
-            </div>
-          </div>
-        </header>
-      );
-    }
-    const LangToggle = ({ lang, setLang }) => <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}> <Icon name="Languages" /> {lang.toUpperCase()}</Button>;
-
-    // ---------- HERO ----------
-    function Hero({ t }) {
-      return (
-        <section className="w-full" id="hero">
-          <div className="mx-auto max-w-7xl px-4 py-20 lg:py-24 grid lg:grid-cols-2 gap-12 items-center">
-            <div className="text-center lg:text-left">
-              <h1 className="text-zinc-900 text-4xl md:text-6xl font-semibold tracking-tight">
-                Znajdź swoje <span className="text-blue-600">wymarzone miejsce</span> z nami
-              </h1>
-              <p className="mt-4 text-lg text-zinc-600">Specjalizujemy się w nieruchomościach premium, oferując profesjonalne doradztwo i dostęp do wyjątkowych ofert na rynku.</p>
-              <div className="mt-8 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
-                <a href="oferty.html" className="line-button">{t.heroCTA}</a>
-                <Button variant="outline" size="lg" className="rounded-full px-8 py-6 text-base">{t.cta}</Button>
-              </div>
-            </div>
-            <div className="flex items-center justify-center">
-              <div className="relative w-full max-w-xl">
-                <div className="absolute -inset-2 bg-gradient-to-br from-blue-200 to-blue-400 rounded-3xl opacity-50 blur-xl"></div>
-                <img src="https://i.imgur.com/CcxoJP0.png" alt="Luksusowy salon z widokiem na miasto" className="relative w-full h-auto object-cover rounded-3xl shadow-2xl"/>
-              </div>
-            </div>
-          </div>
-        </section>
-      );
-    }
-
-    // ---------- BEST OFFERS (z API) ----------
-    function BestOffers({ t, favs, toggleFav }) {
-      const containerRef = useRef(null);
-      const [items, setItems] = useState([]);
-      const scrollTo = (dir) => {
-        const el = containerRef.current; if (!el) return;
-        const w = el.clientWidth;
-        el.scrollTo({ left: el.scrollLeft + (dir === "left" ? -w : w), behavior: "smooth" });
-      };
-      useEffect(() => { (async ()=>{
-        const rows = await api.list(); // najnowsze z serwera
-        setItems(rows.slice(0,9));
-      })(); }, []);
-      return (
-        <section id="offers" className="w-full py-20">
-          <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4">
+  // ---------- HEADER ----------
+  function Header({ lang, setLang, t, authed, setAuthed, menuOpen, setMenuOpen }) {
+    return (
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/60 border-b border-zinc-200/70">
+        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+          <a href="index.html" className="flex items-center gap-3">
+            <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-12 w-12"/>
             <div>
-              <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.bestOffers}</h2>
-              <p className="text-zinc-600 mt-2">Wyselekcjonowane nieruchomości premium</p>
+              <div className="font-semibold tracking-tight">Centrum nieruchomości</div>
+              <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="icon" onClick={() => scrollTo("left")} className="rounded-xl"><Icon name="ChevronLeft" /></Button>
-              <Button variant="outline" size="icon" onClick={() => scrollTo("right")} className="rounded-xl"><Icon name="ChevronRight" /></Button>
+          </a>
+          <nav className="hidden md:flex items-center gap-6 text-sm">
+            {t.nav.map((item, i) => (
+              <a key={i} href={`#${["offers","about","testimonials","contact"][i]}`} className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{item}</a>
+            ))}
+            <a href="oferty.html"><Button variant="secondary" className="shadow-sm">{t.allOffers}</Button></a>
+            <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}><Icon name="Languages"/>{lang.toUpperCase()}</Button>
+            <AuthControls authed={authed} setAuthed={setAuthed}/>
+          </nav>
+          <div className="md:hidden flex items-center gap-2">
+            <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}><Icon name="Languages"/>{lang.toUpperCase()}</Button>
+            <Button variant="outline" size="icon" className="rounded-xl" onClick={() => setMenuOpen(true)}><Icon name="Menu" className="h-5 w-5"/></Button>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
+  function AuthControls({ authed, setAuthed }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <Button variant="outline" className="gap-2" onClick={()=>setOpen(true)}>
+          <Icon name={authed.logged ? "LogOut" : "LogIn"}/>{authed.logged ? "Wyloguj" : "Zaloguj"}
+        </Button>
+        {open && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={()=>setOpen(false)}>
+            <div onClick={(e)=>e.stopPropagation()} className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 border bg-white p-6 shadow-lg rounded-lg">
+              <h2 className="text-lg font-semibold">{authed.logged ? "Wylogowanie" : "Logowanie / Rejestracja"}</h2>
+              {authed.logged ? (
+                <Button onClick={()=>{ setAuthed({logged:false, name:""}); setOpen(false); }} className="w-full">Potwierdź wylogowanie</Button>
+              ) : (
+                <form onSubmit={(e)=>{ e.preventDefault(); setAuthed({logged:true, name:e.target.name.value || "Użytkownik"}); setOpen(false); }} className="space-y-3">
+                  <Input name="name" placeholder="Imię i nazwisko" required/>
+                  <Input name="email" type="email" placeholder="Email" required/>
+                  <Input name="pass" type="password" placeholder="Hasło" required/>
+                  <Button type="submit" className="w-full"><Icon name="UserPlus" className="mr-2"/>Zaloguj / Zarejestruj</Button>
+                </form>
+              )}
             </div>
           </div>
+        )}
+      </>
+    );
+  }
+
+  // ---------- HERO ----------
+  function Hero({ t }) {
+    return (
+      <section className="w-full" id="hero">
+        <div className="mx-auto max-w-7xl px-4 py-20 lg:py-24 grid lg:grid-cols-2 gap-12 items-center">
+          <div className="text-center lg:text-left">
+            <h1 className="text-zinc-900 text-4xl md:text-6xl font-semibold tracking-tight">
+              Znajdź swoje <span className="text-blue-600">wymarzone miejsce</span> z nami
+            </h1>
+            <p className="mt-4 text-lg text-zinc-600">Specjalizujemy się w nieruchomościach premium, oferując profesjonalne doradztwo i dostęp do wyjątkowych ofert na rynku.</p>
+            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
+              <a href="oferty.html" className="line-button">{t.heroCTA}</a>
+              <Button variant="outline" size="lg" className="rounded-full px-8 py-6 text-base">{t.cta}</Button>
+            </div>
+          </div>
+          <div className="flex items-center justify-center">
+            <div className="relative w-full max-w-xl">
+              <div className="absolute -inset-2 bg-gradient-to-br from-blue-200 to-blue-400 rounded-3xl opacity-50 blur-xl"></div>
+              <img src="https://i.imgur.com/CcxoJP0.png" alt="Luksusowy salon z widokiem na miasto" className="relative w-full h-auto object-cover rounded-3xl shadow-2xl"/>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // ---------- BEST OFFERS ----------
+  function BestOffers({ t, favs, toggleFav, listings, loading, error }) {
+    const containerRef = useRef(null);
+    const scroll = (dir) => {
+      const el = containerRef.current; if(!el) return;
+      const w = el.clientWidth;
+      el.scrollTo({ left: el.scrollLeft + (dir === "left" ? -w : w), behavior: "smooth" });
+    };
+    const visible = (listings||[]).slice(0,9);
+
+    return (
+      <section id="offers" className="w-full py-20">
+        <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.bestOffers}</h2>
+            <p className="text-zinc-600 mt-2">Wyselekcjonowane nieruchomości premium</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="icon" onClick={()=>scroll("left")} className="rounded-xl"><Icon name="ChevronLeft"/></Button>
+            <Button variant="outline" size="icon" onClick={()=>scroll("right")} className="rounded-xl"><Icon name="ChevronRight"/></Button>
+          </div>
+        </div>
+
+        <div className="mt-6 mx-auto max-w-7xl px-4">
+          {loading && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {Array.from({length:6}).map((_,i)=>(<div key={i} className="h-80 rounded-3xl bg-zinc-200 animate-pulse" />))}
+            </div>
+          )}
+          {!loading && error && <div className="p-4 rounded-xl bg-red-50 text-red-700 text-center">{error}</div>}
+          {!loading && !error && visible.length === 0 && (
+            <div className="p-4 rounded-xl bg-blue-50 text-blue-700 text-center">Brak ogłoszeń — dodaj pierwsze w panelu <a href="/panel" className="underline">/panel</a>.</div>
+          )}
+        </div>
+
+        {!loading && !error && visible.length > 0 && (
           <div ref={containerRef} className="mt-8 overflow-x-auto scrollbar-none px-4 -mx-4">
             <div className="grid grid-flow-col auto-cols-[85%] md:auto-cols-[33%] gap-6 px-4">
-              {items.map((item) => <OfferCard key={item.id} data={item} fav={favs.includes(item.id)} onFav={(e) => {e.stopPropagation(); toggleFav(item.id);}} />)}
+              {visible.map((item)=>(
+                <OfferCard key={item.id} data={item} fav={favs.includes(item.id)} onFav={(e)=>{e.stopPropagation(); toggleFav(item.id);}}/>
+              ))}
             </div>
           </div>
-        </section>
-      );
-    }
+        )}
+      </section>
+    );
+  }
 
-    function OfferCard({ data, fav, onFav }) {
-      return (
-        <div className="relative group">
-          <Card className="overflow-hidden rounded-3xl border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_20px_60px_-25px_rgba(0,0,0,0.15)] transition-transform duration-300 group-hover:-translate-y-1">
-            <div className="relative h-56">
-              {data.thumb_image_id ? (
-                <img src={`/api/images/${data.thumb_image_id}`} alt={data.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              ) : (
-                <div className="h-full w-full grid place-items-center text-zinc-400 bg-zinc-100">Brak zdjęcia</div>
-              )}
-              <button onClick={onFav} className={cn("absolute top-3 right-3 p-2 rounded-xl transition-all", fav ? "bg-red-500 text-white" : "bg-white/80 text-zinc-800 hover:bg-white")}> <Icon name="Heart" className={cn("h-4 w-4", fav && "fill-current")} /> </button>
-              <span className="absolute left-3 top-3 bg-black/70 text-white backdrop-blur rounded-full px-2.5 py-0.5 text-xs">{data.type || "Nieruchomość"}</span>
+  function OfferCard({ data, fav, onFav }) {
+    const img = firstImageUrl(data);
+    const city = getField(data, ["city"], "");
+    const district = getField(data, ["district"], "");
+    const area = getField(data, ["area","area_m2"], 0);
+    const rooms = getField(data, ["rooms"], 0);
+    const type = getField(data, ["type"], "Mieszkanie");
+    const price = getField(data, ["price","price_pln"], 0);
+    const locationLabel = [city, district].filter(Boolean).join(", ");
+
+    return (
+      <div className="relative group">
+        <Card className="overflow-hidden rounded-3xl border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_20px_60px_-25px_rgba(0,0,0,0.15)] transition-transform duration-300 group-hover:-translate-y-1">
+          <div className="relative h-56">
+            <img src={img} alt={data.title || "Oferta"} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"/>
+            <button onClick={onFav} className={cn("absolute top-3 right-3 p-2 rounded-xl transition-all", fav ? "bg-red-500 text-white" : "bg-white/80 text-zinc-800 hover:bg-white")}>
+              <Icon name="Heart" className={cn("h-4 w-4", fav && "fill-current")}/>
+            </button>
+            <div className="absolute left-3 top-3 flex items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-black/70 text-white text-xs font-semibold px-2.5 py-0.5 backdrop-blur">{type}</span>
             </div>
-            <CardHeader>
-              <CardTitle className="text-xl">{data.title}</CardTitle>
-              <div className="flex items-center gap-2 text-zinc-500 text-sm"><Icon name="MapPin" /> {data.city}{data.district?` • ${data.district}`:""} • {data.area ?? "-"} m² • {data.rooms ?? "-"} pokoje</div>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between">
-              <div className="text-2xl font-semibold">{currency(data.price)}</div>
-              <a href="oferty.html"><Button variant="outline" className="rounded-xl">Szczegóły</Button></a>
+          </div>
+          <CardHeader>
+            <CardTitle className="text-xl">{data.title || `${type} ${city}`}</CardTitle>
+            <div className="flex items-center gap-2 text-zinc-500 text-sm">
+              <Icon name="MapPin"/>{locationLabel || "—"} • {area} m² • {rooms} pokoje
+            </div>
+          </CardHeader>
+          <CardContent className="flex items-center justify-between">
+            <div className="text-2xl font-semibold">{currency(price)}</div>
+            <a href="oferty.html"><Button variant="outline" className="rounded-xl">Szczegóły</Button></a>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ---------- SHORTS / ABOUT / TESTIMONIALS / CONTACT / FOOTER ----------
+  const FACEBOOK_REELS = [
+    { id:1, src:"https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1990065958197943%2F&show_text=false&width=267&t=0" },
+    { id:2, src:"https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1477845613236934%2F&show_text=false&width=267&t=0" },
+    { id:3, src:"https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F2264670390643136%2F&show_text=false&width=267&t=0" },
+    { id:4, src:"https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1176788144348415%2F&show_text=false&width=267&t=0" },
+    { id:5, src:"https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1124597172587459%2F&show_text=false&width=267&t=0" }
+  ];
+  function Shorts({ t }){ return (
+    <section id="shorts" className="w-full py-24" aria-label={t.shorts}>
+      <div className="mx-auto max-w-7xl px-4 grid md:grid-cols-2 gap-10 items-center">
+        <div className="flex flex-col items-center text-center md:items-start md:text-left">
+          <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.shorts}</h3>
+          <p className="text-zinc-600 mt-2">Zobacz nasze najnowsze realizacje i inspiracje prosto z Facebook Reels.</p>
+        </div>
+        <div className="flex items-center justify-center">
+          <div className="relative h-[560px] w-[300px] md:h-[680px] md:w-[340px] rounded-[3rem] border bg-gradient-to-b from-zinc-100 to-white shadow-2xl overflow-hidden">
+            <div className="absolute inset-1 rounded-[2.6rem] overflow-y-scroll snap-y snap-mandatory scrollbar-none">
+              {FACEBOOK_REELS.map(reel => (
+                <div key={reel.id} className="h-full w-full snap-start relative flex-shrink-0">
+                  <iframe src={reel.src} className="w-full h-full" style={{border:'none', overflow:'hidden'}} scrolling="no" frameBorder="0" allowFullScreen allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"></iframe>
+                </div>
+              ))}
+            </div>
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 h-7 w-24 rounded-full bg-black/80"/>
+          </div>
+        </div>
+      </div>
+    </section>
+  );}
+
+  function About({ t }){
+    return (
+      <section id="about" className="w-full py-24">
+        <div className="mx-auto max-w-7xl px-4 grid md:grid-cols-2 gap-12 items-center">
+          <div className="flex flex-col items-center text-center md:items-start md:text-left">
+            <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.about}</h3>
+            <p className="text-zinc-600 mt-4 leading-relaxed">{t.story}</p>
+            <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+              {t.values.map(v => (
+                <div key={v} className="rounded-2xl border bg-white/70 backdrop-blur p-4 text-center shadow-sm">
+                  <Icon name="Star" className="mx-auto text-blue-500"/><div className="mt-1 text-sm font-medium">{v}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-10">
+              <h4 className="font-semibold mb-3">Nasza historia</h4>
+              <ol className="relative border-l border-zinc-200">
+                {[2015,2018,2021,2024].map(year => (
+                  <li key={year} className="mb-6 ml-4">
+                    <div className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full bg-blue-600 border"/><time className="text-xs text-zinc-500">{year}</time>
+                    <p className="text-sm text-left">Kluczowy kamień milowy – rozwój usług i zespołu.</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+          <div className="flex justify-center items-center -space-x-12 md:-space-x-16 h-96">
+            <img src="https://i.imgur.com/g9YnvTq.png" className="w-48 md:w-60 aspect-[9/16] object-cover rounded-2xl shadow-lg border-4 border-white" alt="Marcin Zacharski"/>
+            <img src="https://i.imgur.com/SKLVSRG.png" className="w-56 md:w-64 aspect-[9/16] object-cover rounded-2xl shadow-xl border-4 border-white" alt="Klaudia Zacharska"/>
+            <img src="https://i.imgur.com/hnJemut.png" className="w-48 md:w-60 aspect-[9/16] object-cover rounded-2xl shadow-lg border-4 border-white" alt="Klaudia Zacharska 2"/>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const TESTIMONIALS = [
+    { name:"Anna Kowalska", avatar:"https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=400&auto=format&fit=crop", rating:5, quote:"Profesjonalizm na każdym etapie – znaleźli dla nas idealny apartament." },
+    { name:"Marek Nowak", avatar:"https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?q=80&w=400&auto=format&fit=crop", rating:5, quote:"Świetny kontakt i wsparcie. Czułem, że jestem w dobrych rękach." },
+    { name:"Ewa Zielińska", avatar:"https://images.unsplash.com/photo-1549161099-5c5a8a4cfb03?q=80&w=400&auto=format&fit=crop", rating:4, quote:"Piękne portfolio nieruchomości i realne doradztwo inwestycyjne." }
+  ];
+  function Testimonials({ t }){
+    return (
+      <section id="testimonials" className="w-full py-24">
+        <div className="mx-auto max-w-7xl px-4 text-center">
+          <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.testimonials}</h3>
+          <div className="mt-10 grid md:grid-cols-3 gap-6 text-left">
+            {TESTIMONIALS.map(r => (
+              <Card key={r.name} className="rounded-3xl bg-white/70 backdrop-blur-xl border-zinc-200/70 shadow-[0_20px_60px_-25px_rgba(0,0,0,.2)]">
+                <CardHeader className="flex-row items-center gap-3">
+                  <img src={r.avatar} className="h-12 w-12 rounded-full object-cover" alt={r.name}/>
+                  <div>
+                    <CardTitle className="text-lg">{r.name}</CardTitle>
+                    <div className="text-yellow-500">{"★".repeat(r.rating)}<span className="text-zinc-300">{"★".repeat(5-r.rating)}</span></div>
+                  </div>
+                </CardHeader>
+                <CardContent><p className="italic">"{r.quote}"</p></CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function Contact({ t }){
+    const [state, setState] = useState({ name:"", email:"", phone:"", subject:"", msg:"", consent:false });
+    const [sent, setSent] = useState(false);
+    const allValid = state.name.length>2 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.email) && state.msg.length>5 && state.consent;
+    return (
+      <section id="contact" className="w-full py-24">
+        <div className="mx-auto max-w-7xl px-4 grid md:grid-cols-2 gap-10 items-start">
+          <div className="flex flex-col items-center text-center md:items-start md:text-left">
+            <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.contact}</h3>
+            <p className="text-zinc-600 mt-2">Skontaktuj się z nami – odpowiemy jeszcze dziś.</p>
+            <div className="mt-6 space-y-3 text-blue-600">
+              <div className="flex items-center gap-2"><Icon name="Phone"/><span className="text-zinc-800">534 845 780</span></div>
+              <div className="flex items-center gap-2"><Icon name="Mail"/><span className="text-zinc-800">centrumnieruchomoscikz@op.pl</span></div>
+              <div className="flex items-center gap-2"><Icon name="MapPin"/><span className="text-zinc-800">ul. Starzyńskiego 3, Słupsk</span></div>
+            </div>
+            <div className="mt-6 w-full rounded-2xl overflow-hidden shadow">
+              <iframe title="Mapa" src="http://googleusercontent.com/maps.google.com/3" width="100%" height="280" style={{border:0}} loading="lazy"></iframe>
+            </div>
+          </div>
+          <Card className="rounded-3xl bg-white/70 backdrop-blur-xl border-zinc-200/70 shadow-[0_20px_60px_-25px_rgba(0,0,0,.2)]">
+            <CardHeader><CardTitle>Formularz kontaktowy</CardTitle></CardHeader>
+            <CardContent>
+              {sent ? <div className="p-6 text-green-700 bg-green-50 rounded-2xl">Dziękujemy! Skontaktujemy się wkrótce.</div> : (
+                <form className="space-y-3" onSubmit={(e)=>{e.preventDefault(); if(allValid) setSent(true);}}>
+                  <Input placeholder={t.form.name} value={state.name} onChange={(e)=>setState({...state, name:e.target.value})}/>
+                  <Input placeholder={t.form.email} type="email" value={state.email} onChange={(e)=>setState({...state, email:e.target.value})}/>
+                  <Input placeholder={t.form.phone} type="tel" value={state.phone} onChange={(e)=>setState({...state, phone:e.target.value})}/>
+                  <Input placeholder={t.form.subject} value={state.subject} onChange={(e)=>setState({...state, subject:e.target.value})}/>
+                  <textarea className="w-full min-h-[120px] rounded-md border border-zinc-200 p-3 text-sm" placeholder={t.form.msg} value={state.msg} onChange={(e)=>setState({...state, msg:e.target.value})}/>
+                  <label className="flex items-center gap-2 text-sm text-zinc-600">
+                    <input type="checkbox" checked={state.consent} onChange={(e)=>setState({...state, consent:e.target.checked})}/> {t.form.consent}
+                  </label>
+                  <Button type="submit" className="w-full rounded-2xl" disabled={!allValid}>{t.form.send}</Button>
+                </form>
+              )}
             </CardContent>
           </Card>
         </div>
-      );
-    }
+      </section>
+    );
+  }
 
-    // ---------- SHORTS / ABOUT / TESTIMONIALS / CONTACT / FOOTER ----------
-    function Shorts(){ return null } // (opcjonalnie zostaw pusto – nie wpływa na backend)
-    function About({t}) {
-      return (
-        <section id="about" className="w-full py-24">
-          <div className="mx-auto max-w-7xl px-4 grid md:grid-cols-2 gap-12 items-center">
-            <div className="flex flex-col items-center text-center md:items-start md:text-left">
-              <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.about}</h3>
-              <p className="text-zinc-600 mt-4 leading-relaxed">{t.story}</p>
-              <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-                {t.values.map((v) => <div key={v} className="rounded-2xl border bg-white/70 backdrop-blur p-4 text-center shadow-sm"><Icon name="Star" className="mx-auto text-blue-500" /><div className="mt-1 text-sm font-medium">{v}</div></div>)}
-              </div>
+  function Footer(){
+    return (
+      <footer className="py-10 border-t bg-white/60 backdrop-blur">
+        <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4 text-sm text-zinc-600">
+          <div className="flex items-center gap-3">
+            <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-10 w-10"/>
+            <div>
+              <div className="font-semibold tracking-tight">© {new Date().getFullYear()} Centrum nieruchomości</div>
+              <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
             </div>
-            <div className="flex justify-center items-center"><img src="https://i.imgur.com/SKLVSRG.png" className="w-64 rounded-2xl shadow-xl border-4 border-white" alt="Klaudia Zacharska"/></div>
           </div>
-        </section>
-      );
-    }
-    function Testimonials(){ return null }
-    function Contact({t}) {
-      return (
-        <section id="contact" className="w-full py-24">
-          <div className="mx-auto max-w-7xl px-4 grid md:grid-cols-2 gap-10 items-start">
-            <div className="flex flex-col items-center text-center md:items-start md:text-left">
-              <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.contact}</h3>
-              <p className="text-zinc-600 mt-2">Skontaktuj się z nami – odpowiemy jeszcze dziś.</p>
-              <div className="mt-6 space-y-3 text-blue-600">
-                <div className="flex items-center gap-2"><Icon name="Phone"/> <span className="text-zinc-800">534 845 780</span></div>
-                <div className="flex items-center gap-2"><Icon name="Mail"/> <span className="text-zinc-800">centrumnieruchomoscikz@op.pl</span></div>
-                <div className="flex items-center gap-2"><Icon name="MapPin"/> <span className="text-zinc-800">ul. Starzyńskiego 3, Słupsk</span></div>
-              </div>
-            </div>
-            <Card className="rounded-3xl bg-white/70 backdrop-blur-xl border-zinc-200/70 shadow-[0_20px_60px_-25px_rgba(0,0,0,.2)]">
-              <CardHeader><CardTitle>Formularz kontaktowy</CardTitle></CardHeader>
-              <CardContent><div className="p-6 text-zinc-500">Tu możesz dodać swój formularz / integrację.</div></CardContent>
-            </Card>
+          <div className="flex items-center gap-4">
+            <a href="#" className="hover:text-blue-600">Polityka prywatności</a>
+            <a href="#" className="hover:text-blue-600">RODO</a>
           </div>
-        </section>
-      );
-    }
-    function Footer() {
-      return (
-        <footer className="py-10 border-t bg-white/60 backdrop-blur">
-          <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4 text-sm text-zinc-600">
-            <div className="flex items-center gap-3">
-              <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-10 w-10" />
-              <div>
-                <div className="font-semibold tracking-tight">© {new Date().getFullYear()} Centrum nieruchomości</div>
-                <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-4"><a href="#" className="hover:text-blue-600">Polityka prywatności</a><a href="#" className="hover:text-blue-600">RODO</a></div>
-          </div>
-        </footer>
-      );
-    }
+        </div>
+      </footer>
+    );
+  }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+  const root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(<App/>);
   </script>
 </body>
 </html>
