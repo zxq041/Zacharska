@@ -1,236 +1,273 @@
 // server.js
-// -----------------------------
-// Real Estate server for Railway
-// - Static pages: index.html, oferty.html (/oferty), panel (/panel -> oferty.html)
-// - API:
-//   GET  /api/listings?q=...          -> list with computed image url
-//   POST /api/listings                -> create (multipart), REQUIRES admin
-//   DELETE /api/listings/:id          -> delete, REQUIRES admin
-//   GET  /api/images/:id              -> serve image bytes from DB
-// - Auth: header x-admin-pass (or body/query adminPass)
-// - Images stored in Postgres BYTEA (table images)
-// -----------------------------
-
-const express = require('express');
-const path = require('path');
-const multer = require('multer');
-const { Pool } = require('pg');
-
-require('dotenv').config?.(); // safe if dotenv not installed
+const express = require("express");
+const path = require("path");
+const cookieParser = require("cookie-parser");
+const { Pool } = require("pg");
+const multer = require("multer");
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
 
-// ---------- CONFIG ----------
-const PORT = process.env.PORT || 3000;
-const ADMIN_PASS = process.env.ADMIN_PASS || 'Klaudia0050';
+// --- DB ---
 const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_PASS = process.env.ADMIN_PASS || "Klaudia0050";
 
-// Postgres pool
+if (!DATABASE_URL) {
+  console.error("Missing DATABASE_URL env var.");
+}
+
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: DATABASE_URL?.includes('railway.app') ? { rejectUnauthorized: false } : undefined,
+  ssl: { rejectUnauthorized: false }, // Railway PG
 });
 
-// Create tables if not exist
+// create tables
 async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS listings (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      city TEXT NOT NULL,
+      district TEXT,
+      street TEXT,
+      price INTEGER NOT NULL,
+      rooms INTEGER,
+      area INTEGER,
+      type TEXT,
+      floor INTEGER,
+      balcony BOOLEAN DEFAULT false,
+      terrace BOOLEAN DEFAULT false,
+      garden BOOLEAN DEFAULT false,
+      description TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+    );
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS images (
       id SERIAL PRIMARY KEY,
-      filename TEXT,
-      mimetype TEXT,
-      data BYTEA NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT now()
-    );
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS listings (
-      id BIGSERIAL PRIMARY KEY,
-      created_at TIMESTAMPTZ DEFAULT now(),
-      title TEXT NOT NULL,
-      description TEXT,
-      city TEXT,
-      district TEXT,
-      street TEXT,
-      type TEXT,
-      price NUMERIC,
-      rooms INT,
-      area NUMERIC,
-      floor INT,
-      balcony BOOLEAN DEFAULT FALSE,
-      terrace BOOLEAN DEFAULT FALSE,
-      garden  BOOLEAN DEFAULT FALSE,
-      image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
-      image_url TEXT
+      listing_id INTEGER REFERENCES listings(id) ON DELETE CASCADE,
+      content_type TEXT NOT NULL,
+      bytes BYTEA NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
     );
   `);
 }
 initDb().catch((e) => {
-  console.error('DB init error:', e);
+  console.error("DB init error:", e);
   process.exit(1);
 });
 
-// ---------- AUTH ----------
+// --- STATIC (index.html, oferty.html) ---
+app.use(express.static(path.join(__dirname)));
+
+// --- PANEL AUTH ---
+app.post("/api/panel/login", (req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    try {
+      const { password } = JSON.parse(body || "{}");
+      if (password === ADMIN_PASS) {
+        // prosty cookie token (na 24h)
+        res.cookie("admin", "1", { httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 });
+        return res.json({ ok: true });
+      }
+      return res.status(401).json({ ok: false, error: "Nieprawidłowe hasło" });
+    } catch {
+      return res.status(400).json({ ok: false, error: "Invalid body" });
+    }
+  });
+});
+
+app.post("/api/panel/logout", (req, res) => {
+  res.clearCookie("admin");
+  res.json({ ok: true });
+});
+
+app.get("/api/panel/me", (req, res) => {
+  res.json({ authed: req.cookies.admin === "1" });
+});
+
+// --- MULTER (upload do RAM, potem do PG BYTEA) ---
+const upload = multer({ storage: multer.memoryStorage() });
+
+// --- HELPERS ---
 function requireAdmin(req, res, next) {
-  const pass = req.headers['x-admin-pass'] || req.body?.adminPass || req.query?.adminPass;
-  if (pass !== ADMIN_PASS) return res.status(401).json({ error: 'Unauthorized' });
+  if (req.cookies.admin !== "1") return res.status(401).json({ error: "Unauthorized" });
   next();
 }
 
-// ---------- MULTER (memory -> DB) ----------
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+// --- LISTINGS API ---
+
+// GET /api/listings (lista + miniatury)
+app.get("/api/listings", async (req, res) => {
+  const { q, city, type, min_area, max_area, min_price, max_price, rooms } = req.query;
+
+  const filters = [];
+  const params = [];
+  let i = 1;
+
+  if (q)        { filters.push(`title ILIKE $${i++}`); params.push(`%${q}%`); }
+  if (city)     { filters.push(`city = $${i++}`); params.push(city); }
+  if (type)     { filters.push(`type = $${i++}`); params.push(type); }
+  if (rooms)    { filters.push(`rooms >= $${i++}`); params.push(Number(rooms)); }
+  if (min_area) { filters.push(`area >= $${i++}`); params.push(Number(min_area)); }
+  if (max_area) { filters.push(`area <= $${i++}`); params.push(Number(max_area)); }
+  if (min_price){ filters.push(`price >= $${i++}`); params.push(Number(min_price)); }
+  if (max_price){ filters.push(`price <= $${i++}`); params.push(Number(max_price)); }
+
+  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const rows = (await pool.query(
+    `
+    SELECT l.*,
+      (SELECT i.id FROM images i WHERE i.listing_id = l.id ORDER BY i.id ASC LIMIT 1) AS thumb_image_id,
+      (SELECT COUNT(*)::int FROM images i WHERE i.listing_id = l.id) AS images_count
+    FROM listings l
+    ${where}
+    ORDER BY l.created_at DESC
+    `
+    , params)).rows;
+
+  res.json(rows);
 });
 
-// ---------- HELPERS ----------
-function mapRowToListing(row) {
-  // Zwracamy ujednolicone "image" do frontu: /api/images/:id lub image_url
-  return {
-    id: Number(row.id),
-    createdAt: new Date(row.created_at).getTime(),
-    title: row.title,
-    description: row.description || '',
-    city: row.city || '',
-    district: row.district || '',
-    street: row.street || '',
-    type: row.type || 'Mieszkanie',
-    price: row.price !== null ? Number(row.price) : 0,
-    rooms: row.rooms !== null ? Number(row.rooms) : 0,
-    area: row.area !== null ? Number(row.area) : 0,
-    floor: row.floor !== null ? Number(row.floor) : 0,
-    balcony: !!row.balcony,
-    terrace: !!row.terrace,
-    garden: !!row.garden,
-    image: row.image_id ? `/api/images/${row.image_id}` : (row.image_url || ''),
-  };
-}
+// GET /api/listings/:id (ze zdjęciami)
+app.get("/api/listings/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows } = await pool.query(`SELECT * FROM listings WHERE id=$1`, [id]);
+  if (!rows[0]) return res.status(404).json({ error: "Not found" });
 
-// ---------- API: LISTINGS ----------
-app.get('/api/listings', async (req, res) => {
-  try {
-    const q = (req.query.q || '').trim();
-    let sql = `SELECT * FROM listings`;
-    const values = [];
-    if (q) {
-      // proste szukanie po kilku kolumnach
-      sql += ` WHERE
-        (title ILIKE $1 OR city ILIKE $1 OR type ILIKE $1 OR district ILIKE $1 OR street ILIKE $1
-         OR CAST(price AS TEXT) ILIKE $1 OR CAST(rooms AS TEXT) ILIKE $1 OR CAST(area AS TEXT) ILIKE $1
-        )`;
-      values.push(`%${q}%`);
-    }
-    sql += ` ORDER BY created_at DESC`;
-    const { rows } = await pool.query(sql, values);
-    res.json(rows.map(mapRowToListing));
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Server error' });
+  const imgs = (await pool.query(
+    `SELECT id, content_type FROM images WHERE listing_id=$1 ORDER BY id ASC`, [id]
+  )).rows;
+
+  res.json({ ...rows[0], images: imgs });
+});
+
+// POST /api/listings (dodanie z wieloma zdjęciami) [admin]
+app.post("/api/listings", requireAdmin, upload.array("images", 20), async (req, res) => {
+  const {
+    title, city, district, street, price,
+    rooms, area, type, floor, balcony, terrace, garden, description
+  } = req.body;
+
+  if (!title || !city || !price) {
+    return res.status(400).json({ error: "Brak wymaganych pól: title, city, price" });
   }
-});
 
-app.post('/api/listings', requireAdmin, upload.single('imageFile'), async (req, res) => {
-  try {
-    // 1) jeśli jest plik — zapisujemy do images
-    let imageId = null;
-    if (req.file && req.file.buffer?.length) {
-      const { originalname, mimetype, buffer } = req.file;
-      const insertImg = await pool.query(
-        `INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3) RETURNING id`,
-        [originalname, mimetype, buffer]
-      );
-      imageId = insertImg.rows[0].id;
-    }
+  const { rows } = await pool.query(
+    `INSERT INTO listings
+      (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+    [
+      title,
+      city,
+      district || null,
+      street || null,
+      Number(price),
+      rooms ? Number(rooms) : null,
+      area ? Number(area) : null,
+      type || null,
+      floor ? Number(floor) : null,
+      balcony === "true",
+      terrace === "true",
+      garden === "true",
+      description || null,
+    ]
+  );
 
-    // 2) pozostałe pola
-    const b = req.body;
-    const data = {
-      title: b.title || '',
-      description: b.description || '',
-      city: b.city || '',
-      district: b.district || '',
-      street: b.street || '',
-      type: b.type || 'Mieszkanie',
-      price: b.price ? Number(b.price) : null,
-      rooms: b.rooms ? Number(b.rooms) : null,
-      area: b.area ? Number(b.area) : null,
-      floor: b.floor ? Number(b.floor) : null,
-      balcony: ['true', 'on', true, '1', 1].includes(b.balcony),
-      terrace: ['true', 'on', true, '1', 1].includes(b.terrace),
-      garden:  ['true', 'on', true, '1', 1].includes(b.garden),
-      image_url: b.imageUrl || null,
-      image_id: imageId,
-    };
+  const listingId = rows[0].id;
 
-    const insert = await pool.query(
-      `INSERT INTO listings
-        (title, description, city, district, street, type, price, rooms, area, floor,
-         balcony, terrace, garden, image_id, image_url)
-       VALUES
-        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-       RETURNING *`,
-      [
-        data.title, data.description, data.city, data.district, data.street, data.type,
-        data.price, data.rooms, data.area, data.floor,
-        data.balcony, data.terrace, data.garden, data.image_id, data.image_url
-      ]
+  // zdjęcia
+  for (const file of req.files || []) {
+    await pool.query(
+      `INSERT INTO images (listing_id, content_type, bytes) VALUES ($1,$2,$3)`,
+      [listingId, file.mimetype || "image/jpeg", file.buffer]
     );
-
-    res.status(201).json(mapRowToListing(insert.rows[0]));
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Server error' });
   }
+
+  res.json({ ok: true, id: listingId });
 });
 
-app.delete('/api/listings/:id', requireAdmin, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { rows } = await pool.query(`SELECT image_id FROM listings WHERE id = $1`, [id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+// PUT /api/listings/:id (edycja; opcjonalnie dodanie kolejnych zdjęć) [admin]
+app.put("/api/listings/:id", requireAdmin, upload.array("images", 20), async (req, res) => {
+  const id = Number(req.params.id);
 
-    const imgId = rows[0].image_id;
-    await pool.query(`DELETE FROM listings WHERE id = $1`, [id]);
-    if (imgId) await pool.query(`DELETE FROM images WHERE id = $1`, [imgId]);
+  const {
+    title, city, district, street, price,
+    rooms, area, type, floor, balcony, terrace, garden, description
+  } = req.body;
 
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Server error' });
+  // aktualizacja pól (zachowujemy poprzednie jeśli undefined)
+  const { rows: curRows } = await pool.query(`SELECT * FROM listings WHERE id=$1`, [id]);
+  if (!curRows[0]) return res.status(404).json({ error: "Not found" });
+  const cur = curRows[0];
+
+  await pool.query(
+    `UPDATE listings SET
+      title=$1, city=$2, district=$3, street=$4, price=$5,
+      rooms=$6, area=$7, type=$8, floor=$9,
+      balcony=$10, terrace=$11, garden=$12, description=$13
+     WHERE id=$14`,
+    [
+      title ?? cur.title,
+      city ?? cur.city,
+      district ?? cur.district,
+      street ?? cur.street,
+      price !== undefined ? Number(price) : cur.price,
+      rooms !== undefined ? Number(rooms) : cur.rooms,
+      area !== undefined ? Number(area) : cur.area,
+      type ?? cur.type,
+      floor !== undefined ? Number(floor) : cur.floor,
+      balcony !== undefined ? (String(balcony) === "true") : cur.balcony,
+      terrace !== undefined ? (String(terrace) === "true") : cur.terrace,
+      garden !== undefined ? (String(garden) === "true") : cur.garden,
+      description ?? cur.description,
+      id
+    ]
+  );
+
+  // ewentualne nowe zdjęcia
+  for (const file of req.files || []) {
+    await pool.query(
+      `INSERT INTO images (listing_id, content_type, bytes) VALUES ($1,$2,$3)`,
+      [id, file.mimetype || "image/jpeg", file.buffer]
+    );
   }
+
+  res.json({ ok: true });
 });
 
-// ---------- API: IMAGES (serve bytes from DB) ----------
-app.get('/api/images/:id', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { rows } = await pool.query(`SELECT mimetype, data FROM images WHERE id = $1`, [id]);
-    if (rows.length === 0) return res.status(404).send('Not Found');
-    res.setHeader('Content-Type', rows[0].mimetype || 'application/octet-stream');
-    res.send(rows[0].data);
-  } catch (e) {
-    console.error(e);
-    res.status(500).send('Server error');
-  }
+// DELETE /api/listings/:id [admin]
+app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  await pool.query(`DELETE FROM listings WHERE id=$1`, [id]);
+  res.json({ ok: true });
 });
 
-// ---------- STATIC PAGES ----------
-app.use(express.static(__dirname));
-
-// root
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// DELETE /api/images/:id [admin]
+app.delete("/api/images/:id", requireAdmin, async (req, res) => {
+  const imgId = Number(req.params.id);
+  await pool.query(`DELETE FROM images WHERE id=$1`, [imgId]);
+  res.json({ ok: true });
 });
 
-// list & panel (panel jest w oferty.html; front pokazuje login)
-app.get(['/oferty', '/panel'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'oferty.html'));
+// GET /api/images/:id (serwowanie obrazka)
+app.get("/api/images/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows } = await pool.query(`SELECT content_type, bytes FROM images WHERE id=$1`, [id]);
+  if (!rows[0]) return res.status(404).send("Not found");
+  res.setHeader("Content-Type", rows[0].content_type || "image/jpeg");
+  res.send(rows[0].bytes);
 });
 
-// 404
-app.use((_, res) => res.status(404).send('Not Found'));
-
-// ---------- START ----------
-app.listen(PORT, () => {
-  console.log(`Server running on :${PORT}`);
+// --- ROUTES FOR STATIC PAGES ---
+// /panel ma zwrócić oferty.html (ten sam plik), a React w środku pokaże panel jeśli ścieżka kończy się /panel
+app.get("/panel", (req, res) => {
+  res.sendFile(path.join(__dirname, "oferty.html"));
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server on http://0.0.0.0:" + PORT));
