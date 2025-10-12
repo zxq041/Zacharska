@@ -1,182 +1,103 @@
-import express from "express";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
-import morgan from "morgan";
-import helmet from "helmet";
-import compression from "compression";
-import { nanoid } from "nanoid";
+const express = require("express");
+const path = require("path");
+const fs = require("fs");
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// === USTAWIENIA ===
-const PORT = process.env.PORT || 3000;
-const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "listings.json");
-
-// === POMOCNICZE: odczyt/zapis JSON ===
-function ensureDataFile() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DATA_FILE)) {
-    const seed = [
-      {
-        id: 1,
-        uid: nanoid(8),
-        title: "Penthouse Sky Tower",
-        city: "Warszawa",
-        price: 1200000,
-        rooms: 4,
-        area: 96,
-        type: "Apartament",
-        floor: 15,
-        garden: false,
-        terrace: true,
-        image: "https://images.unsplash.com/photo-1523217582562-09d0def993a6?q=80&w=1600&auto=format&fit=crop",
-        createdAt: Date.now() - 1000 * 60 * 60 * 24 * 3
-      },
-      {
-        id: 2,
-        uid: nanoid(8),
-        title: "Apartament Marina",
-        city: "Gdańsk",
-        price: 890000,
-        rooms: 3,
-        area: 72,
-        type: "Mieszkanie",
-        floor: 6,
-        garden: false,
-        terrace: true,
-        image: "https://images.unsplash.com/photo-1505692794403-34d4982f88aa?q=80&w=1600&auto=format&fit=crop",
-        createdAt: Date.now() - 1000 * 60 * 60 * 24 * 2
-      }
-    ];
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ seq: 2, items: seed }, null, 2), "utf8");
-  }
-}
-
-function readData() {
-  ensureDataFile();
-  const raw = fs.readFileSync(DATA_FILE, "utf8");
-  return JSON.parse(raw);
-}
-function writeData(obj) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(obj, null, 2), "utf8");
-}
-
-// === APP ===
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Bezpieczniejsze nagłówki (pozwól na osadzanie iframe Facebook Reels)
-app.use(
-  helmet({
-    contentSecurityPolicy: false
-  })
-);
+// ── statyki z katalogu głównego repo (bo index.html i oferty.html są w root)
+app.use(express.static(__dirname, { extensions: ["html"] }));
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-// Logi + kompresja + JSON body
-app.use(morgan("tiny"));
-app.use(compression());
-app.use(express.json({ limit: "1mb" }));
+// ── prosty "dysk" na ogłoszenia
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "listings.json");
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+if (!fs.existsSync(DB_FILE))
+  fs.writeFileSync(DB_FILE, JSON.stringify({ items: [] }, null, 2), "utf8");
 
-// === API ===
-
-// Healthcheck
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
-
-// Pobierz listę ogłoszeń (posortowane najnowsze -> najstarsze)
-app.get("/api/listings", (_req, res) => {
-  const { items } = readData();
-  const sorted = [...items].sort((a, b) => b.createdAt - a.createdAt);
-  res.json(sorted);
+// ── strony
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// Dodaj ogłoszenie
-app.post("/api/listings", (req, res) => {
-  const body = req.body || {};
-  const required = ["title", "city", "price", "area"];
-  for (const key of required) {
-    if (
-      body[key] === undefined ||
-      body[key] === null ||
-      String(body[key]).trim() === ""
-    ) {
-      return res.status(400).json({ error: `Brak pola: ${key}` });
-    }
+app.get(["/oferty", "/oferty.html"], (_req, res) => {
+  res.sendFile(path.join(__dirname, "oferty.html"));
+});
+
+app.get("/panel", (_req, res) => {
+  const adminFile = path.join(__dirname, "panel.html");
+  // jeśli nie masz jeszcze panel.html – pokaż listę ofert z formularzem (oferty.html)
+  res.sendFile(fs.existsSync(adminFile) ? adminFile : path.join(__dirname, "oferty.html"));
+});
+
+// ── API
+app.get("/api/listings", (_req, res) => {
+  try {
+    const { items } = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+    // najnowsze najpierw
+    const sorted = [...items].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    res.json(sorted);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "READ_FAILED" });
   }
+});
 
-  const data = readData();
-  const nextId = (data.seq || 0) + 1;
-
+app.post("/api/listings", (req, res) => {
+  const p = req.body || {};
+  // podstawowe pola – dopasuj do formularza na froncie
+  if (!p.title || !p.city || !p.price) {
+    return res.status(400).json({ error: "MISSING_FIELDS" });
+  }
   const item = {
-    id: nextId,
-    uid: nanoid(8),
-    title: String(body.title).trim(),
-    city: String(body.city).trim(),
-    price: Number(body.price) || 0,
-    rooms: Number(body.rooms) || 1,
-    area: Number(body.area) || 0,
-    type: body.type ? String(body.type) : "Mieszkanie",
-    floor: Number(body.floor) || 0,
-    garden: !!body.garden,
-    terrace: !!body.terrace,
-    image:
-      body.image ||
-      "https://images.unsplash.com/photo-1528909514045-2fa4ac7a08ba?q=80&w=1600&auto=format&fit=crop",
-    createdAt: Date.now()
+    id: Math.random().toString(36).slice(2),
+    title: p.title,
+    city: p.city,
+    price: Number(p.price),
+    rooms: Number(p.rooms || 0),
+    area: Number(p.area || 0),
+    type: p.type || "Mieszkanie",
+    floor: Number(p.floor || 0),
+    terrace: Boolean(p.terrace),
+    garden: Boolean(p.garden),
+    image: p.image || "https://images.unsplash.com/photo-1505691723518-36a5ac3b2d51?q=80&w=1600&auto=format&fit=crop",
+    createdAt: new Date().toISOString(),
+    // dowolne dodatkowe pola:
+    description: p.description || ""
   };
 
-  data.seq = nextId;
-  data.items.unshift(item);
-  writeData(data);
-
-  res.status(201).json(item);
-});
-
-// Usuń ogłoszenie po id (liczbowym)
-app.delete("/api/listings/:id", (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isFinite(id)) return res.status(400).json({ error: "Złe id" });
-
-  const data = readData();
-  const before = data.items.length;
-  data.items = data.items.filter((x) => x.id !== id);
-  if (data.items.length === before) {
-    return res.status(404).json({ error: "Nie znaleziono" });
+  try {
+    const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+    db.items.unshift(item); // najnowsze na górze
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+    res.status(201).json(item);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "WRITE_FAILED" });
   }
-  writeData(data);
-  res.json({ ok: true });
 });
 
-// === STATIC ===
-app.use(express.static(PUBLIC_DIR, { extensions: ["html"] }));
-
-// /panel serwuje plik ofert
-const offersFile = fs.existsSync(path.join(PUBLIC_DIR, "oferty.html"))
-  ? "oferty.html"
-  : fs.existsSync(path.join(PUBLIC_DIR, "oferta.html"))
-  ? "oferta.html"
-  : null;
-
-if (offersFile) {
-  app.get("/panel", (_req, res) =>
-    res.sendFile(path.join(PUBLIC_DIR, offersFile))
-  );
-  // alias ścieżki czytelnej: /oferty
-  app.get("/oferty", (_req, res) =>
-    res.sendFile(path.join(PUBLIC_DIR, offersFile))
-  );
-}
-
-// Fallback – pozwala na „ładne” linki
-app.get("*", (req, res, next) => {
-  // jeśli żądanie wygląda na asset (ma kropkę w ścieżce), oddaj 404 do next()
-  if (path.extname(req.path)) return next();
-  // w innym wypadku wracaj na index.html (SPA-like)
-  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+app.delete("/api/listings/:id", (req, res) => {
+  try {
+    const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+    const idx = db.items.findIndex((x) => x.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "NOT_FOUND" });
+    const [removed] = db.items.splice(idx, 1);
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+    res.json(removed);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "DELETE_FAILED" });
+  }
 });
+
+// ── fallback (dla innych ścieżek zwróć 404 lub index, tu 404)
+app.use((_req, res) => res.status(404).send("Not Found"));
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server listening on ${PORT}`);
 });
