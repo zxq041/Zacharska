@@ -1,103 +1,236 @@
-const express = require("express");
-const path = require("path");
-const fs = require("fs");
+// server.js
+// -----------------------------
+// Real Estate server for Railway
+// - Static pages: index.html, oferty.html (/oferty), panel (/panel -> oferty.html)
+// - API:
+//   GET  /api/listings?q=...          -> list with computed image url
+//   POST /api/listings                -> create (multipart), REQUIRES admin
+//   DELETE /api/listings/:id          -> delete, REQUIRES admin
+//   GET  /api/images/:id              -> serve image bytes from DB
+// - Auth: header x-admin-pass (or body/query adminPass)
+// - Images stored in Postgres BYTEA (table images)
+// -----------------------------
+
+const express = require('express');
+const path = require('path');
+const multer = require('multer');
+const { Pool } = require('pg');
+
+require('dotenv').config?.(); // safe if dotenv not installed
 
 const app = express();
+app.use(express.json());
+
+// ---------- CONFIG ----------
 const PORT = process.env.PORT || 3000;
+const ADMIN_PASS = process.env.ADMIN_PASS || 'Klaudia0050';
+const DATABASE_URL = process.env.DATABASE_URL;
 
-// ── statyki z katalogu głównego repo (bo index.html i oferty.html są w root)
-app.use(express.static(__dirname, { extensions: ["html"] }));
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
-
-// ── prosty "dysk" na ogłoszenia
-const DATA_DIR = path.join(__dirname, "data");
-const DB_FILE = path.join(DATA_DIR, "listings.json");
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-if (!fs.existsSync(DB_FILE))
-  fs.writeFileSync(DB_FILE, JSON.stringify({ items: [] }, null, 2), "utf8");
-
-// ── strony
-app.get("/", (_req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+// Postgres pool
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: DATABASE_URL?.includes('railway.app') ? { rejectUnauthorized: false } : undefined,
 });
 
-app.get(["/oferty", "/oferty.html"], (_req, res) => {
-  res.sendFile(path.join(__dirname, "oferty.html"));
-});
-
-app.get("/panel", (_req, res) => {
-  const adminFile = path.join(__dirname, "panel.html");
-  // jeśli nie masz jeszcze panel.html – pokaż listę ofert z formularzem (oferty.html)
-  res.sendFile(fs.existsSync(adminFile) ? adminFile : path.join(__dirname, "oferty.html"));
-});
-
-// ── API
-app.get("/api/listings", (_req, res) => {
-  try {
-    const { items } = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-    // najnowsze najpierw
-    const sorted = [...items].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+// Create tables if not exist
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS images (
+      id SERIAL PRIMARY KEY,
+      filename TEXT,
+      mimetype TEXT,
+      data BYTEA NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
     );
-    res.json(sorted);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "READ_FAILED" });
-  }
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS listings (
+      id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      title TEXT NOT NULL,
+      description TEXT,
+      city TEXT,
+      district TEXT,
+      street TEXT,
+      type TEXT,
+      price NUMERIC,
+      rooms INT,
+      area NUMERIC,
+      floor INT,
+      balcony BOOLEAN DEFAULT FALSE,
+      terrace BOOLEAN DEFAULT FALSE,
+      garden  BOOLEAN DEFAULT FALSE,
+      image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+      image_url TEXT
+    );
+  `);
+}
+initDb().catch((e) => {
+  console.error('DB init error:', e);
+  process.exit(1);
 });
 
-app.post("/api/listings", (req, res) => {
-  const p = req.body || {};
-  // podstawowe pola – dopasuj do formularza na froncie
-  if (!p.title || !p.city || !p.price) {
-    return res.status(400).json({ error: "MISSING_FIELDS" });
-  }
-  const item = {
-    id: Math.random().toString(36).slice(2),
-    title: p.title,
-    city: p.city,
-    price: Number(p.price),
-    rooms: Number(p.rooms || 0),
-    area: Number(p.area || 0),
-    type: p.type || "Mieszkanie",
-    floor: Number(p.floor || 0),
-    terrace: Boolean(p.terrace),
-    garden: Boolean(p.garden),
-    image: p.image || "https://images.unsplash.com/photo-1505691723518-36a5ac3b2d51?q=80&w=1600&auto=format&fit=crop",
-    createdAt: new Date().toISOString(),
-    // dowolne dodatkowe pola:
-    description: p.description || ""
+// ---------- AUTH ----------
+function requireAdmin(req, res, next) {
+  const pass = req.headers['x-admin-pass'] || req.body?.adminPass || req.query?.adminPass;
+  if (pass !== ADMIN_PASS) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
+
+// ---------- MULTER (memory -> DB) ----------
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});
+
+// ---------- HELPERS ----------
+function mapRowToListing(row) {
+  // Zwracamy ujednolicone "image" do frontu: /api/images/:id lub image_url
+  return {
+    id: Number(row.id),
+    createdAt: new Date(row.created_at).getTime(),
+    title: row.title,
+    description: row.description || '',
+    city: row.city || '',
+    district: row.district || '',
+    street: row.street || '',
+    type: row.type || 'Mieszkanie',
+    price: row.price !== null ? Number(row.price) : 0,
+    rooms: row.rooms !== null ? Number(row.rooms) : 0,
+    area: row.area !== null ? Number(row.area) : 0,
+    floor: row.floor !== null ? Number(row.floor) : 0,
+    balcony: !!row.balcony,
+    terrace: !!row.terrace,
+    garden: !!row.garden,
+    image: row.image_id ? `/api/images/${row.image_id}` : (row.image_url || ''),
   };
+}
 
+// ---------- API: LISTINGS ----------
+app.get('/api/listings', async (req, res) => {
   try {
-    const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-    db.items.unshift(item); // najnowsze na górze
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
-    res.status(201).json(item);
+    const q = (req.query.q || '').trim();
+    let sql = `SELECT * FROM listings`;
+    const values = [];
+    if (q) {
+      // proste szukanie po kilku kolumnach
+      sql += ` WHERE
+        (title ILIKE $1 OR city ILIKE $1 OR type ILIKE $1 OR district ILIKE $1 OR street ILIKE $1
+         OR CAST(price AS TEXT) ILIKE $1 OR CAST(rooms AS TEXT) ILIKE $1 OR CAST(area AS TEXT) ILIKE $1
+        )`;
+      values.push(`%${q}%`);
+    }
+    sql += ` ORDER BY created_at DESC`;
+    const { rows } = await pool.query(sql, values);
+    res.json(rows.map(mapRowToListing));
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "WRITE_FAILED" });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.delete("/api/listings/:id", (req, res) => {
+app.post('/api/listings', requireAdmin, upload.single('imageFile'), async (req, res) => {
   try {
-    const db = JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-    const idx = db.items.findIndex((x) => x.id === req.params.id);
-    if (idx === -1) return res.status(404).json({ error: "NOT_FOUND" });
-    const [removed] = db.items.splice(idx, 1);
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
-    res.json(removed);
+    // 1) jeśli jest plik — zapisujemy do images
+    let imageId = null;
+    if (req.file && req.file.buffer?.length) {
+      const { originalname, mimetype, buffer } = req.file;
+      const insertImg = await pool.query(
+        `INSERT INTO images (filename, mimetype, data) VALUES ($1, $2, $3) RETURNING id`,
+        [originalname, mimetype, buffer]
+      );
+      imageId = insertImg.rows[0].id;
+    }
+
+    // 2) pozostałe pola
+    const b = req.body;
+    const data = {
+      title: b.title || '',
+      description: b.description || '',
+      city: b.city || '',
+      district: b.district || '',
+      street: b.street || '',
+      type: b.type || 'Mieszkanie',
+      price: b.price ? Number(b.price) : null,
+      rooms: b.rooms ? Number(b.rooms) : null,
+      area: b.area ? Number(b.area) : null,
+      floor: b.floor ? Number(b.floor) : null,
+      balcony: ['true', 'on', true, '1', 1].includes(b.balcony),
+      terrace: ['true', 'on', true, '1', 1].includes(b.terrace),
+      garden:  ['true', 'on', true, '1', 1].includes(b.garden),
+      image_url: b.imageUrl || null,
+      image_id: imageId,
+    };
+
+    const insert = await pool.query(
+      `INSERT INTO listings
+        (title, description, city, district, street, type, price, rooms, area, floor,
+         balcony, terrace, garden, image_id, image_url)
+       VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING *`,
+      [
+        data.title, data.description, data.city, data.district, data.street, data.type,
+        data.price, data.rooms, data.area, data.floor,
+        data.balcony, data.terrace, data.garden, data.image_id, data.image_url
+      ]
+    );
+
+    res.status(201).json(mapRowToListing(insert.rows[0]));
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "DELETE_FAILED" });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// ── fallback (dla innych ścieżek zwróć 404 lub index, tu 404)
-app.use((_req, res) => res.status(404).send("Not Found"));
+app.delete('/api/listings/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { rows } = await pool.query(`SELECT image_id FROM listings WHERE id = $1`, [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
+    const imgId = rows[0].image_id;
+    await pool.query(`DELETE FROM listings WHERE id = $1`, [id]);
+    if (imgId) await pool.query(`DELETE FROM images WHERE id = $1`, [imgId]);
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ---------- API: IMAGES (serve bytes from DB) ----------
+app.get('/api/images/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { rows } = await pool.query(`SELECT mimetype, data FROM images WHERE id = $1`, [id]);
+    if (rows.length === 0) return res.status(404).send('Not Found');
+    res.setHeader('Content-Type', rows[0].mimetype || 'application/octet-stream');
+    res.send(rows[0].data);
+  } catch (e) {
+    console.error(e);
+    res.status(500).send('Server error');
+  }
+});
+
+// ---------- STATIC PAGES ----------
+app.use(express.static(__dirname));
+
+// root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// list & panel (panel jest w oferty.html; front pokazuje login)
+app.get(['/oferty', '/panel'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'oferty.html'));
+});
+
+// 404
+app.use((_, res) => res.status(404).send('Not Found'));
+
+// ---------- START ----------
 app.listen(PORT, () => {
-  console.log(`✅ Server listening on ${PORT}`);
+  console.log(`Server running on :${PORT}`);
 });
