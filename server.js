@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 
-// --- Upload (memory; max 12 plików po 10MB) ---
+// --- Upload: wiele plików do 10 MB każdy ---
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 12 },
@@ -33,9 +33,8 @@ app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ---- STATIC ----
-// UWAGA: pliki index.html, oferty.html itp. muszą być w ./public
-app.use(express.static(path.join(__dirname, "public")));
+// ---- STATIC z katalogu głównego repo ----
+app.use(express.static(__dirname));
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Klaudia0050";
 
@@ -106,7 +105,10 @@ app.post("/api/logout", (req, res) => {
 // --- Images serving ---
 app.get("/api/images/:id", async (req, res) => {
   const { id } = req.params;
-  const { rows } = await pool.query("SELECT mime, data FROM images WHERE id=$1", [id]);
+  const { rows } = await pool.query(
+    "SELECT mime, data FROM images WHERE id=$1",
+    [id]
+  );
   if (rows.length === 0) return res.status(404).send("Not found");
   res.setHeader("Content-Type", rows[0].mime);
   res.send(rows[0].data);
@@ -141,109 +143,164 @@ app.get("/api/listings/:id", async (req, res) => {
 });
 
 // --- Create (multi images) ---
-app.post("/api/listings", requireAdmin, upload.array("images", 12), async (req, res) => {
-  try {
+app.post(
+  "/api/listings",
+  requireAdmin,
+  upload.array("images", 12),
+  async (req, res) => {
+    try {
+      const {
+        title,
+        city,
+        district,
+        street,
+        price,
+        rooms,
+        area,
+        type,
+        floor,
+        balcony,
+        terrace,
+        garden,
+        description,
+      } = req.body;
+
+      const { rows } = await pool.query(
+        `INSERT INTO listings (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         RETURNING *;`,
+        [
+          title,
+          city,
+          district || null,
+          street || null,
+          Number(price),
+          Number(rooms),
+          Number(area),
+          type,
+          floor ? Number(floor) : null,
+          balcony === "true",
+          terrace === "true",
+          garden === "true",
+          description || null,
+        ]
+      );
+      const listing = rows[0];
+
+      if (req.files?.length) {
+        for (const f of req.files) {
+          await pool.query(
+            "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
+            [listing.id, f.mimetype, f.buffer]
+          );
+        }
+      }
+
+      const { rows: out } = await pool.query(
+        `SELECT l.*,
+                COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
+         FROM listings l
+         LEFT JOIN images i ON i.listing_id = l.id
+         WHERE l.id=$1
+         GROUP BY l.id;`,
+        [listing.id]
+      );
+      res.status(201).json(out[0]);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: "Błąd zapisu ogłoszenia" });
+    }
+  }
+);
+
+// --- Update + add/remove images ---
+app.put(
+  "/api/listings/:id",
+  requireAdmin,
+  upload.array("images", 12),
+  async (req, res) => {
+    const { id } = req.params;
     const {
-      title, city, district, street, price, rooms, area, type,
-      floor, balcony, terrace, garden, description,
+      title,
+      city,
+      district,
+      street,
+      price,
+      rooms,
+      area,
+      type,
+      floor,
+      balcony,
+      terrace,
+      garden,
+      description,
+      remove_images,
     } = req.body;
 
-    const { rows } = await pool.query(
-      `INSERT INTO listings (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING *;`,
-      [
-        title, city, district || null, street || null, Number(price), Number(rooms),
-        Number(area), type, floor ? Number(floor) : null,
-        balcony === "true", terrace === "true", garden === "true",
-        description || null,
-      ]
-    );
-    const listing = rows[0];
+    try {
+      await pool.query(
+        `UPDATE listings SET
+          title=$1, city=$2, district=$3, street=$4, price=$5, rooms=$6, area=$7,
+          type=$8, floor=$9, balcony=$10, terrace=$11, garden=$12, description=$13
+         WHERE id=$14`,
+        [
+          title,
+          city,
+          district || null,
+          street || null,
+          Number(price),
+          Number(rooms),
+          Number(area),
+          type,
+          floor ? Number(floor) : null,
+          balcony === "true",
+          terrace === "true",
+          garden === "true",
+          description || null,
+          id,
+        ]
+      );
 
-    if (req.files?.length) {
-      for (const f of req.files) {
-        await pool.query(
-          "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
-          [listing.id, f.mimetype, f.buffer]
-        );
+      // usuwanie wskazanych zdjęć
+      if (remove_images) {
+        let arr = [];
+        try {
+          arr = JSON.parse(remove_images);
+        } catch {}
+        if (Array.isArray(arr) && arr.length) {
+          await pool.query(
+            `DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])`,
+            [id, arr]
+          );
+        }
       }
-    }
 
-    const { rows: out } = await pool.query(
-      `SELECT l.*,
-              COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-       FROM listings l
-       LEFT JOIN images i ON i.listing_id = l.id
-       WHERE l.id=$1
-       GROUP BY l.id;`,
-      [listing.id]
-    );
-    res.status(201).json(out[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: "Błąd zapisu ogłoszenia" });
+      // dodawanie nowych zdjęć
+      if (req.files?.length) {
+        for (const f of req.files) {
+          await pool.query(
+            "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
+            [id, f.mimetype, f.buffer]
+          );
+        }
+      }
+
+      const { rows: out } = await pool.query(
+        `SELECT l.*,
+                COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
+         FROM listings l
+         LEFT JOIN images i ON i.listing_id = l.id
+         WHERE l.id=$1
+         GROUP BY l.id;`,
+        [id]
+      );
+      res.json(out[0]);
+    } catch (e) {
+      console.error(e);
+      res.status(400).json({ error: "Błąd aktualizacji ogłoszenia" });
+    }
   }
-});
-
-// --- Update ---
-app.put("/api/listings/:id", requireAdmin, upload.array("images", 12), async (req, res) => {
-  const { id } = req.params;
-  const {
-    title, city, district, street, price, rooms, area, type,
-    floor, balcony, terrace, garden, description,
-    remove_images,
-  } = req.body;
-
-  try {
-    await pool.query(
-      `UPDATE listings SET
-        title=$1, city=$2, district=$3, street=$4, price=$5, rooms=$6, area=$7,
-        type=$8, floor=$9, balcony=$10, terrace=$11, garden=$12, description=$13
-       WHERE id=$14`,
-      [
-        title, city, district || null, street || null, Number(price), Number(rooms),
-        Number(area), type, floor ? Number(floor) : null,
-        balcony === "true", terrace === "true", garden === "true",
-        description || null, id,
-      ]
-    );
-
-    if (remove_images) {
-      let arr = [];
-      try { arr = JSON.parse(remove_images); } catch {}
-      if (Array.isArray(arr) && arr.length) {
-        await pool.query(
-          `DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])`,
-          [id, arr]
-        );
-      }
-    }
-
-    if (req.files?.length) {
-      for (const f of req.files) {
-        await pool.query(
-          "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
-          [id, f.mimetype, f.buffer]
-        );
-      }
-    }
-
-    const { rows: out } = await pool.query(
-      `SELECT l.*,
-              COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-       FROM listings l
-       LEFT JOIN images i ON i.listing_id = l.id
-       WHERE l.id=$1
-       GROUP BY l.id;`,
-      [id]
-    );
-    res.json(out[0]);
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: "Błąd aktualizacji ogłoszenia" });
-  }
-});
+);
 
 // --- Delete ---
 app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
@@ -255,14 +312,14 @@ app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
 // --- Health (dla Railway) ---
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-// --- ROUTING HTML ---
+// --- ROUTING HTML z katalogu głównego ---
 // / -> index.html
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(path.join(__dirname, "index.html"));
 });
-// /oferty.html i /panel -> oferty.html
+// /oferty.html oraz /panel -> oferty.html (panel osadzony w oferty.html)
 app.get(["/oferty.html", "/panel"], (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "oferty.html"));
+  res.sendFile(path.join(__dirname, "oferty.html"));
 });
 
 // --- Start ---
