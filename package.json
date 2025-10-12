@@ -1,0 +1,22 @@
+{
+  "name": "centrum-nieruchomosci",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Strona główna + lista ofert + panel admina (Railway)",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "postinstall": "node -e \"import('fs').then(fs=>{try{fs.mkdirSync('data',{recursive:true});}catch{}})\""
+  },
+  "dependencies": {
+    "compression": "^1.7.4",
+    "express": "^4.19.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "nanoid": "^5.0.7"
+  }
+}
