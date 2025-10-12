@@ -1,4 +1,4 @@
-// server.js (CommonJS)
+// server.js — wersja finalna bez logowania, z /panel33201
 const express = require("express");
 const path = require("path");
 const cookieParser = require("cookie-parser");
@@ -10,13 +10,13 @@ dotenv.config();
 
 const app = express();
 
-// --- Upload: wiele plików do 10 MB każdy ---
+// ====== KONFIGURACJA UPLOADU ======
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 12 },
 });
 
-// --- DB (Railway Postgres) ---
+// ====== KONFIGURACJA BAZY ======
 const { Pool } = pg;
 const connectionString =
   process.env.DATABASE_URL ||
@@ -30,15 +30,13 @@ const pool = new Pool({
 });
 
 app.use(cookieParser());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// ---- STATIC z katalogu głównego repo ----
+// ====== STATYCZNE PLIKI ======
 app.use(express.static(__dirname));
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Klaudia0050";
-
-// --- DB init ---
+// ====== INICJALIZACJA TABEL ======
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS listings (
@@ -69,259 +67,169 @@ async function initDb() {
     );
   `);
 
-  console.log("DB ready");
+  console.log("✅ Baza danych gotowa");
 }
+
 initDb().catch((e) => {
-  console.error("DB init error:", e);
+  console.error("❌ Błąd połączenia z bazą:", e);
   process.exit(1);
 });
 
-// --- Auth middleware ---
-function requireAdmin(req, res, next) {
-  if (req.cookies?.admin_auth === "true") return next();
-  res.status(403).json({ error: "Brak dostępu" });
-}
-
-// --- Auth endpoints ---
-app.post("/api/login", (req, res) => {
-  const { password } = req.body || {};
-  if (password === ADMIN_PASSWORD) {
-    res.cookie("admin_auth", "true", {
-      httpOnly: true,
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60, // 1h
-      secure: process.env.NODE_ENV === "production",
-    });
-    return res.json({ ok: true });
-  }
-  return res.status(401).json({ ok: false, error: "Błędne hasło" });
-});
-
-app.post("/api/logout", (req, res) => {
-  res.clearCookie("admin_auth");
-  res.json({ ok: true });
-});
-
-// --- Images serving ---
+// ====== API ZDJĘĆ ======
 app.get("/api/images/:id", async (req, res) => {
   const { id } = req.params;
-  const { rows } = await pool.query(
-    "SELECT mime, data FROM images WHERE id=$1",
-    [id]
-  );
+  const { rows } = await pool.query("SELECT mime, data FROM images WHERE id=$1", [id]);
   if (rows.length === 0) return res.status(404).send("Not found");
   res.setHeader("Content-Type", rows[0].mime);
   res.send(rows[0].data);
 });
 
-// --- Listings: list + one ---
+// ====== API OGŁOSZEŃ ======
+
+// Wszystkie ogłoszenia
 app.get("/api/listings", async (_req, res) => {
-  const { rows } = await pool.query(
-    `SELECT l.*,
-            COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-     FROM listings l
-     LEFT JOIN images i ON i.listing_id = l.id
-     GROUP BY l.id
-     ORDER BY l.created_at DESC;`
-  );
+  const { rows } = await pool.query(`
+    SELECT l.*, COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
+    FROM listings l
+    LEFT JOIN images i ON i.listing_id = l.id
+    GROUP BY l.id
+    ORDER BY l.created_at DESC;
+  `);
   res.json(rows);
 });
 
+// Jedno ogłoszenie
 app.get("/api/listings/:id", async (req, res) => {
   const { id } = req.params;
-  const { rows } = await pool.query(
-    `SELECT l.*,
-            COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-     FROM listings l
-     LEFT JOIN images i ON i.listing_id = l.id
-     WHERE l.id=$1
-     GROUP BY l.id;`,
-    [id]
-  );
-  if (rows.length === 0) return res.status(404).json({ error: "Not found" });
+  const { rows } = await pool.query(`
+    SELECT l.*, COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
+    FROM listings l
+    LEFT JOIN images i ON i.listing_id = l.id
+    WHERE l.id=$1
+    GROUP BY l.id;
+  `, [id]);
+  if (rows.length === 0) return res.status(404).json({ error: "Nie znaleziono" });
   res.json(rows[0]);
 });
 
-// --- Create (multi images) ---
-app.post(
-  "/api/listings",
-  requireAdmin,
-  upload.array("images", 12),
-  async (req, res) => {
-    try {
-      const {
-        title,
-        city,
-        district,
-        street,
-        price,
-        rooms,
-        area,
-        type,
-        floor,
-        balcony,
-        terrace,
-        garden,
-        description,
-      } = req.body;
-
-      const { rows } = await pool.query(
-        `INSERT INTO listings (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         RETURNING *;`,
-        [
-          title,
-          city,
-          district || null,
-          street || null,
-          Number(price),
-          Number(rooms),
-          Number(area),
-          type,
-          floor ? Number(floor) : null,
-          balcony === "true",
-          terrace === "true",
-          garden === "true",
-          description || null,
-        ]
-      );
-      const listing = rows[0];
-
-      if (req.files?.length) {
-        for (const f of req.files) {
-          await pool.query(
-            "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
-            [listing.id, f.mimetype, f.buffer]
-          );
-        }
-      }
-
-      const { rows: out } = await pool.query(
-        `SELECT l.*,
-                COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-         FROM listings l
-         LEFT JOIN images i ON i.listing_id = l.id
-         WHERE l.id=$1
-         GROUP BY l.id;`,
-        [listing.id]
-      );
-      res.status(201).json(out[0]);
-    } catch (e) {
-      console.error(e);
-      res.status(400).json({ error: "Błąd zapisu ogłoszenia" });
-    }
-  }
-);
-
-// --- Update + add/remove images ---
-app.put(
-  "/api/listings/:id",
-  requireAdmin,
-  upload.array("images", 12),
-  async (req, res) => {
-    const { id } = req.params;
+// Dodaj ogłoszenie (bez logowania, panel ukryty przez URL)
+app.post("/api/listings", upload.array("images", 12), async (req, res) => {
+  try {
     const {
-      title,
-      city,
-      district,
-      street,
-      price,
-      rooms,
-      area,
-      type,
-      floor,
-      balcony,
-      terrace,
-      garden,
-      description,
-      remove_images,
+      title, city, district, street, price,
+      rooms, area, type, floor, balcony,
+      terrace, garden, description
     } = req.body;
 
-    try {
-      await pool.query(
-        `UPDATE listings SET
-          title=$1, city=$2, district=$3, street=$4, price=$5, rooms=$6, area=$7,
-          type=$8, floor=$9, balcony=$10, terrace=$11, garden=$12, description=$13
-         WHERE id=$14`,
-        [
-          title,
-          city,
-          district || null,
-          street || null,
-          Number(price),
-          Number(rooms),
-          Number(area),
-          type,
-          floor ? Number(floor) : null,
-          balcony === "true",
-          terrace === "true",
-          garden === "true",
-          description || null,
-          id,
-        ]
-      );
+    const { rows } = await pool.query(`
+      INSERT INTO listings (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      RETURNING *;
+    `, [
+      title, city, district || null, street || null,
+      Number(price), Number(rooms), Number(area),
+      type, floor ? Number(floor) : null,
+      balcony === "true", terrace === "true", garden === "true",
+      description || null
+    ]);
 
-      // usuwanie wskazanych zdjęć
-      if (remove_images) {
-        let arr = [];
-        try {
-          arr = JSON.parse(remove_images);
-        } catch {}
-        if (Array.isArray(arr) && arr.length) {
-          await pool.query(
-            `DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])`,
-            [id, arr]
-          );
-        }
+    const listing = rows[0];
+
+    if (req.files?.length) {
+      for (const f of req.files) {
+        await pool.query(
+          "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
+          [listing.id, f.mimetype, f.buffer]
+        );
       }
-
-      // dodawanie nowych zdjęć
-      if (req.files?.length) {
-        for (const f of req.files) {
-          await pool.query(
-            "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
-            [id, f.mimetype, f.buffer]
-          );
-        }
-      }
-
-      const { rows: out } = await pool.query(
-        `SELECT l.*,
-                COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-         FROM listings l
-         LEFT JOIN images i ON i.listing_id = l.id
-         WHERE l.id=$1
-         GROUP BY l.id;`,
-        [id]
-      );
-      res.json(out[0]);
-    } catch (e) {
-      console.error(e);
-      res.status(400).json({ error: "Błąd aktualizacji ogłoszenia" });
     }
-  }
-);
 
-// --- Delete ---
-app.delete("/api/listings/:id", requireAdmin, async (req, res) => {
-  const { id } = req.params;
-  await pool.query("DELETE FROM listings WHERE id=$1", [id]);
-  res.json({ ok: true });
+    res.status(201).json({ success: true, listing });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: "Błąd podczas dodawania ogłoszenia" });
+  }
 });
 
-// --- Health (dla Railway) ---
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
+// Edycja ogłoszenia
+app.put("/api/listings/:id", upload.array("images", 12), async (req, res) => {
+  const { id } = req.params;
+  const {
+    title, city, district, street, price,
+    rooms, area, type, floor, balcony,
+    terrace, garden, description, remove_images
+  } = req.body;
 
-// --- ROUTING HTML z katalogu głównego ---
-// / -> index.html
+  try {
+    await pool.query(`
+      UPDATE listings SET
+      title=$1, city=$2, district=$3, street=$4, price=$5, rooms=$6,
+      area=$7, type=$8, floor=$9, balcony=$10, terrace=$11, garden=$12, description=$13
+      WHERE id=$14;
+    `, [
+      title, city, district || null, street || null,
+      Number(price), Number(rooms), Number(area),
+      type, floor ? Number(floor) : null,
+      balcony === "true", terrace === "true", garden === "true",
+      description || null, id
+    ]);
+
+    if (remove_images) {
+      let arr = [];
+      try { arr = JSON.parse(remove_images); } catch {}
+      if (Array.isArray(arr) && arr.length) {
+        await pool.query("DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])", [id, arr]);
+      }
+    }
+
+    if (req.files?.length) {
+      for (const f of req.files) {
+        await pool.query(
+          "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
+          [id, f.mimetype, f.buffer]
+        );
+      }
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: "Błąd aktualizacji" });
+  }
+});
+
+// Usuń ogłoszenie
+app.delete("/api/listings/:id", async (req, res) => {
+  const { id } = req.params;
+  await pool.query("DELETE FROM listings WHERE id=$1", [id]);
+  res.json({ success: true });
+});
+
+// ====== ROUTING STRON ======
+
+// Strona główna
 app.get("/", (_req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
-// /oferty.html oraz /panel -> oferty.html (panel osadzony w oferty.html)
-app.get(["/oferty.html", "/panel"], (_req, res) => {
+
+// Zwykłe oferty
+app.get("/oferty.html", (_req, res) => {
   res.sendFile(path.join(__dirname, "oferty.html"));
 });
 
-// --- Start ---
+// Panel administracyjny — tylko po tajnym URL
+app.get("/panel33201", (_req, res) => {
+  res.sendFile(path.join(__dirname, "oferty.html"));
+});
+
+// Opcjonalne przekierowanie starego adresu /panel
+app.get("/panel", (_req, res) => {
+  res.redirect("/");
+});
+
+// Healthcheck (dla Railway)
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+// ====== START SERVERA ======
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Listening on " + PORT));
+app.listen(PORT, () => console.log(`🚀 Serwer działa na porcie ${PORT}`));
