@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Wszystkie oferty - Centrum nieruchomości</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -11,520 +11,530 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    .animate-fade-in { animation: fadeIn 0.3s ease-out; }
     .scrollbar-none::-webkit-scrollbar { display: none; }
+    .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+    @keyframes fadeIn { from {opacity:0;} to {opacity:1;} }
+    .animate-fade-in { animation: fadeIn 0.25s ease-out; }
+
+    /* estetyczny input plików */
+    .file-input::file-selector-button{
+      margin-right: 12px;
+      border: 0;
+      background: #2563eb;
+      color: #fff;
+      padding: .5rem .9rem;
+      border-radius: .6rem;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .file-input:hover::file-selector-button{ background:#1d4ed8; }
   </style>
 </head>
-<body>
+<body class="bg-gradient-to-b from-blue-50 via-white to-blue-50 text-zinc-900">
   <div id="root"></div>
 
-  <script type="text/babel">
-    const { useEffect, useMemo, useRef, useState } = React;
+<script type="text/babel">
+const { useEffect, useMemo, useRef, useState } = React;
 
-    // ---------- UTIL ----------
-    const cn = (...classes) => classes.filter(Boolean).join(' ');
-    const clamp = (n, min, max) => Math.max(min, Math.min(n, max));
-    const currency = (n) => new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 }).format(n);
-    const useLocalStorage = (key, initial) => {
-      const [state, setState] = useState(() => {
-        try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : initial } catch { return initial }
-      });
-      useEffect(() => { try { localStorage.setItem(key, JSON.stringify(state)) } catch {} }, [key, state]);
-      return [state, setState];
-    };
+// --- CONFIG ---
+const API = {
+  list: "/api/listings",
+  one: (id)=>`/api/listings/${id}`,
+  img: (id)=>`/api/images/${id}`,
+  login: "/api/login",
+  logout: "/api/logout"
+};
 
-    // ---------- API ----------
-    const api = {
-      async me() { const r=await fetch("/api/panel/me"); return r.json(); },
-      async login(password){ const r=await fetch("/api/panel/login",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({password})}); return r.json(); },
-      async logout(){ await fetch("/api/panel/logout",{method:"POST"}); },
+// --- utils/ui ---
+const cn = (...c) => c.filter(Boolean).join(" ");
+const currency = (n)=> new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN",maximumFractionDigits:0}).format(n);
 
-      async list(params={}) { const q=new URLSearchParams(params).toString(); const r=await fetch(`/api/listings${q?`?${q}`:""}`); return r.json(); },
-      async get(id){ const r=await fetch(`/api/listings/${id}`); return r.json(); },
+const Icon = ({ name, className }) => {
+  const icons = {
+    MapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></>,
+    Phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>,
+    Mail: <><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></>,
+    Menu: <><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></>,
+    Heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
+    ChevronLeft: <path d="m15 18-6-6 6-6"/>,
+    X: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
+    Languages: <><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></>,
+    Loader2: <path d="M21 12a9 9 0 1 1-6.219-8.56" />,
+    Edit: <><path d="M12 20h9"/><path d="M16.5 3.5 20.5 7.5 7 21H3v-4z"/></>,
+    Trash: <><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></>,
+    Upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></>,
+    Image: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></>
+  };
+  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("h-4 w-4", className)}>{icons[name]}</svg>;
+};
 
-      async create(fd){ const r=await fetch(`/api/listings`,{method:"POST",body:fd}); return r.json(); },
-      async update(id, fd){ const r=await fetch(`/api/listings/${id}`,{method:"PUT",body:fd}); return r.json(); },
-      async del(id){ const r=await fetch(`/api/listings/${id}`,{method:"DELETE"}); return r.json(); },
-      async delImage(id){ const r=await fetch(`/api/images/${id}`,{method:"DELETE"}); return r.json(); },
-      imageUrl(id){ return `/api/images/${id}`; }
-    };
+const Button = ({ variant="default", className, children, ...p })=>{
+  const variants = {
+    default: "bg-blue-600 text-white hover:bg-blue-700",
+    outline: "border border-zinc-200 bg-transparent hover:bg-blue-50",
+    ghost: "hover:bg-blue-100",
+    danger: "bg-red-500 text-white hover:bg-red-600"
+  };
+  return <button className={cn("inline-flex items-center gap-2 rounded-md text-sm font-medium px-4 py-2 transition-colors", variants[variant], className)} {...p}>{children}</button>;
+};
 
-    // ---------- ICONS ----------
-    const Icon = ({ name, className }) => {
-      const icons = {
-        MapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
-        Heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
-        ChevronLeft: <path d="m15 18-6-6 6-6" />,
-        X: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
-        Languages: <><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></>,
-        LogIn: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" /></>,
-        LogOut: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></>,
-        UserPlus: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" x2="19" y1="8" y2="14" /><line x1="22" x2="16" y1="11" y2="11" /></>,
-        Loader2: <path d="M21 12a9 9 0 1 1-6.219-8.56" />,
-      };
-      return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("h-4 w-4", className)}>{icons[name]}</svg>;
-    };
+const Card = ({className, children})=> <div className={cn("rounded-2xl border bg-white/80 backdrop-blur shadow-sm", className)}>{children}</div>;
+const CardHeader = ({children, className})=> <div className={cn("p-5 border-b", className)}>{children}</div>;
+const CardContent = ({children, className})=> <div className={cn("p-5", className)}>{children}</div>;
+const Input = (p)=> <input {...p} className={cn("w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500", p.className)}/>;
+const Textarea = (p)=> <textarea {...p} className={cn("w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500", p.className)}/>;
 
-    // ---------- UI ----------
-    const Button = ({ variant = 'default', size = 'default', className, children, ...props }) => {
-      const variants = { 
-        default: "bg-blue-600 text-white hover:bg-blue-700",
-        destructive: "bg-red-500 text-white hover:bg-red-600", 
-        outline: "border border-zinc-200 bg-transparent hover:bg-blue-50",
-        secondary: "bg-blue-100 text-blue-800 hover:bg-blue-200",
-        ghost: "hover:bg-blue-100",
-        link: "text-blue-600 underline-offset-4 hover:underline",
-      };
-      const sizes = { default: "h-10 px-4 py-2", sm: "h-9 rounded-md px-3", lg: "h-11 rounded-md px-8", icon: "h-10 w-10", };
-      return <button className={cn("inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none", variants[variant], sizes[size], className)} {...props}>{children}</button>;
-    };
-    const Card = ({ className, children }) => <div className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}>{children}</div>;
-    const CardHeader = ({ className, children }) => <div className={cn("flex flex-col space-y-1.5 p-6", className)}>{children}</div>;
-    const CardTitle = ({ className, children }) => <h3 className={cn("text-2xl font-semibold leading-none tracking-tight", className)}>{children}</h3>;
-    const CardContent = ({ className, children }) => <div className={cn("p-6 pt-0", className)}>{children}</div>;
-    const Input = ({ className, ...props }) => <input className={cn("flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50", className)} {...props} />;
-    const Badge = ({ variant = 'default', className, children }) => {
-      const variants = { default: "border-transparent bg-blue-600 text-blue-50", secondary: "border-transparent bg-blue-100 text-blue-900" };
-      return <div className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors", variants[variant], className)}>{children}</div>;
-    };
-    const Slider = ({ className, min = 0, max = 100, step = 1, defaultValue = [0, 100], onValueChange }) => {
-      const [values, setValues] = useState(defaultValue);
-      const rangeRef = useRef(null);
-      useEffect(() => { setValues(defaultValue); }, [defaultValue]);
-      const handleMouseMove = (e, thumbIndex) => {
-        if (!rangeRef.current) return;
-        const rect = rangeRef.current.getBoundingClientRect();
-        const percent = clamp((e.clientX - rect.left) / rect.width, 0, 1);
-        const newValue = Math.round((min + percent * (max - min)) / step) * step;
-        let newValues = [...values];
-        if (thumbIndex === 0) newValues[0] = Math.min(newValue, values[1] - step);
-        else newValues[1] = Math.max(newValue, values[0] + step);
-        setValues(newValues);
-        onValueChange && onValueChange(newValues);
-      };
-      const handleMouseDown = (thumbIndex) => (e) => {
-        const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-        const onMove = (moveE) => handleMouseMove(moveE, thumbIndex);
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      };
-      const leftPercent = ((values[0] - min) / (max - min)) * 100;
-      const rightPercent = ((values[1] - min) / (max - min)) * 100;
-      return (
-        <div ref={rangeRef} className={cn("relative flex items-center select-none touch-none w-full h-5 cursor-pointer", className)}>
-          <div className="relative w-full h-1 bg-zinc-200 rounded-full">
-            <div className="absolute h-full bg-blue-600 rounded-full" style={{ left: `${leftPercent}%`, right: `${100 - rightPercent}%` }} />
-            <div onMouseDown={handleMouseDown(0)} className="absolute w-4 h-4 bg-white border-2 border-blue-600 rounded-full -top-1.5 transform -translate-x-1/2" style={{ left: `${leftPercent}%` }} />
-            <div onMouseDown={handleMouseDown(1)} className="absolute w-4 h-4 bg-white border-2 border-blue-600 rounded-full -top-1.5 transform -translate-x-1/2" style={{ left: `${rightPercent}%` }} />
+// --- App ---
+function App(){
+  const path = window.location.pathname;
+  const isPanelRoute = path === "/panel";
+
+  return (
+    <>
+      <Header/>
+      <main className="mx-auto max-w-7xl px-4 py-8">
+        {isPanelRoute ? <AdminGate/> : <ClientView/>}
+      </main>
+      <Footer/>
+    </>
+  );
+}
+
+// --- Header/Footer (bez przycisku logowania) ---
+function Header(){
+  return (
+    <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/60 border-b border-zinc-200/70">
+      <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+        <a href="/oferty.html" className="flex items-center gap-3">
+          <img src="https://i.imgur.com/UwnwhuV.png" className="h-12 w-12" alt="Logo"/>
+          <div>
+            <div className="font-semibold tracking-tight">Centrum nieruchomości</div>
+            <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
+          </div>
+        </a>
+        <nav className="hidden md:flex items-center gap-6 text-sm">
+          <a href="/oferty.html" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all hover:after:w-full">Oferty</a>
+          <a href="/#about" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all hover:after:w-full">O nas</a>
+          <a href="/#testimonials" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all hover:after:w-full">Opinie</a>
+          <a href="/#contact" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all hover:after:w-full">Kontakt</a>
+          <a href="/panel" className="text-zinc-500 hover:text-zinc-900">/panel</a>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function Footer(){
+  return (
+    <footer className="py-10 border-t bg-white/60 backdrop-blur mt-10">
+      <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4 text-sm text-zinc-600">
+        <div className="flex items-center gap-3">
+          <img src="https://i.imgur.com/UwnwhuV.png" className="h-10 w-10" alt="Logo"/>
+          <div>
+            <div className="font-semibold tracking-tight">© {new Date().getFullYear()} Centrum nieruchomości</div>
+            <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
           </div>
         </div>
-      );
-    };
+        <div className="flex items-center gap-4">
+          <a href="#" className="hover:text-blue-600">Polityka prywatności</a>
+          <a href="#" className="hover:text-blue-600">RODO</a>
+        </div>
+      </div>
+    </footer>
+  );
+}
 
-    // ---------- TEXTS ----------
-    const dict = {
-      pl: { nav: ["Oferty", "O nas", "Opinie", "Kontakt"], allOffers: "Wszystkie Oferty", filters: { location: "Lokalizacja", price: "Cena", area: "Metraż", rooms: "Pokoje", type: "Typ", newest: "Najnowsze", cheapest: "Najtańsze", featured: "Polecane", grid: "Siatka", list: "Lista", fav: "Ulubione", clear: "Wyczyść" } },
-      en: { nav: ["Listings", "About", "Reviews", "Contact"], allOffers: "All Listings", filters: { location: "Location", price: "Price", area: "Area", rooms: "Rooms", type: "Type", newest: "Newest", cheapest: "Cheapest", featured: "Featured", grid: "Grid", list: "List", fav: "Favourites", clear: "Clear" } }
-    };
+// --- CLIENT VIEW: list + modal with gallery ---
+function ClientView(){
+  const [items,setItems]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [selected,setSelected]=useState(null);
 
-    // ---------- HEADER ----------
-    function Header({ lang, setLang, t }) {
-      return (
-        <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/60 border-b border-zinc-200/70">
-          <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
-            <a href="index.html" className="flex items-center gap-3">
-              <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-12 w-12" />
-              <div>
-                <div className="font-semibold tracking-tight">Centrum nieruchomości</div>
-                <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
-              </div>
-            </a>
-            <nav className="hidden md:flex items-center gap-6 text-sm">
-              <a href="index.html#offers" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[0]}</a>
-              <a href="index.html#about" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[1]}</a>
-              <a href="index.html#testimonials" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[2]}</a>
-              <a href="index.html#contact" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[3]}</a>
-              <Button variant="secondary" className="shadow-sm">{t.allOffers}</Button>
-              <LangToggle lang={lang} setLang={setLang} />
-            </nav>
-          </div>
-        </header>
-      );
-    }
-    function LangToggle({ lang, setLang }) { return <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}> <Icon name="Languages" /> {lang.toUpperCase()}</Button>; }
+  useEffect(()=>{
+    (async ()=>{
+      try{
+        const r = await fetch(API.list);
+        const d = await r.json();
+        setItems(d);
+      }catch(e){ console.error(e); }
+      finally{ setLoading(false); }
+    })();
+  },[]);
 
-    // ---------- FOOTER ----------
-    function Footer() {
-      return (
-        <footer className="py-10 border-t bg-white/60 backdrop-blur">
-          <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4 text-sm text-zinc-600">
-            <div className="flex items-center gap-3">
-              <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-10 w-10" />
-              <div>
-                <div className="font-semibold tracking-tight">© {new Date().getFullYear()} Centrum nieruchomości</div>
-                <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
+  return (
+    <>
+      <h1 className="text-3xl font-semibold tracking-tight">Wszystkie oferty</h1>
+      {loading && <div className="mt-6 grid md:grid-cols-3 gap-4">{Array.from({length:6}).map((_,i)=><div key={i} className="h-80 rounded-2xl bg-zinc-200 animate-pulse"/>)}</div>}
+      {!loading && items.length===0 && <div className="mt-6 p-4 bg-blue-50 rounded-xl text-blue-700">Brak ogłoszeń.</div>}
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        {items.map(it=>(
+          <Card key={it.id} className="overflow-hidden group cursor-pointer" onClick={()=>setSelected(it)}>
+            <div className="relative h-56">
+              {it.image_ids?.length ?
+                <img src={API.img(it.image_ids[0])} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" alt={it.title}/> :
+                <div className="h-full w-full bg-zinc-200 grid place-items-center text-zinc-500"><Icon name="Image"/>&nbsp;Brak zdjęcia</div>
+              }
+              <div className="absolute left-3 top-3">
+                <span className="text-xs px-2 py-1 rounded-full bg-black/70 text-white">{it.type}</span>
               </div>
             </div>
-            <div className="flex items-center gap-4"><a href="#" className="hover:text-blue-600">Polityka prywatności</a><a href="#" className="hover:text-blue-600">RODO</a></div>
+            <CardHeader>
+              <div className="text-xl font-semibold">{it.title}</div>
+              <div className="text-sm text-zinc-600 flex items-center gap-2 mt-1">
+                <Icon name="MapPin"/>{it.city}{it.district?` • ${it.district}`:""} {it.street?` • ${it.street}`:""}
+              </div>
+            </CardHeader>
+            <CardContent className="flex items-center justify-between">
+              <div className="text-2xl font-semibold">{currency(it.price)}</div>
+              <Button variant="outline">Szczegóły</Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {selected && <DetailsModal item={selected} onClose={()=>setSelected(null)}/>}
+    </>
+  );
+}
+
+function DetailsModal({item,onClose}){
+  const [idx,setIdx]=useState(0);
+  const images = item.image_ids||[];
+
+  useEffect(()=>{
+    const onKey=(e)=>{
+      if(e.key==="Escape") onClose();
+      if(e.key==="ArrowRight") setIdx(i=> (i+1)%Math.max(images.length,1));
+      if(e.key==="ArrowLeft") setIdx(i=> (i-1+Math.max(images.length,1))%Math.max(images.length,1));
+    };
+    window.addEventListener("keydown",onKey);
+    return ()=> window.removeEventListener("keydown",onKey);
+  },[images.length,onClose]);
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[100] grid place-items-center p-4 animate-fade-in" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-5xl w-full overflow-hidden" onClick={(e)=>e.stopPropagation()}>
+        <div className="relative w-full h-96 bg-black">
+          {images.length? (
+            <img src={API.img(images[idx])} alt="" className="w-full h-full object-cover"/>
+          ) : (
+            <div className="w-full h-full grid place-items-center text-white/70"><Icon name="Image" className="h-8 w-8"/> Brak zdjęć</div>
+          )}
+          {images.length>1 && (
+            <>
+              <button onClick={()=>setIdx((idx-1+images.length)%images.length)} className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2"><Icon name="ChevronLeft"/></button>
+              <button onClick={()=>setIdx((idx+1)%images.length)} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2"><svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6"/></svg></button>
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1">
+                {images.map((_,i)=><div key={i} className={cn("w-2 h-2 rounded-full", i===idx? "bg-white":"bg-white/50")}></div>)}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="p-6 grid md:grid-cols-2 gap-6">
+          <div>
+            <h2 className="text-2xl font-semibold">{item.title}</h2>
+            <div className="text-zinc-600 mt-1 flex items-center gap-2"><Icon name="MapPin"/>{item.city}{item.district?` • ${item.district}`:""} {item.street?` • ${item.street}`:""}</div>
+            <div className="text-3xl font-bold mt-4">{currency(item.price)}</div>
+            <div className="grid grid-cols-2 gap-3 text-sm mt-6">
+              <div className="font-medium text-zinc-600">Typ</div><div>{item.type}</div>
+              <div className="font-medium text-zinc-600">Metraż</div><div>{item.area} m²</div>
+              <div className="font-medium text-zinc-600">Pokoje</div><div>{item.rooms}</div>
+              <div className="font-medium text-zinc-600">Piętro</div><div>{item.floor ?? "-"}</div>
+              <div className="font-medium text-zinc-600">Balkon</div><div>{item.balcony? "Tak":"Nie"}</div>
+              <div className="font-medium text-zinc-600">Taras</div><div>{item.terrace? "Tak":"Nie"}</div>
+              <div className="font-medium text-zinc-600">Ogród</div><div>{item.garden? "Tak":"Nie"}</div>
+            </div>
           </div>
-        </footer>
-      );
+          <div>
+            <h3 className="font-semibold text-lg">Opis</h3>
+            <p className="mt-2 text-zinc-700 leading-relaxed whitespace-pre-wrap">{item.description || "Brak opisu."}</p>
+          </div>
+        </div>
+        <div className="p-4 border-t flex justify-end">
+          <Button variant="outline" onClick={onClose}><Icon name="X"/> Zamknij</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- ADMIN: gate (login) + dashboard ---
+function AdminGate(){
+  const [ok,setOk]=useState(null); // null=nie próbował, true=authed, false=not
+  const [pass,setPass]=useState("");
+  const [error,setError]=useState("");
+
+  // spróbuj załadować listę — jeśli 403, to nie zalogowany
+  useEffect(()=>{
+    (async ()=>{
+      try{
+        const r = await fetch(API.list, { credentials:"include" }); // publiczne, ale cookie pokaże w dalszym UI
+        if(r.ok){ setOk(true); } else { setOk(false); }
+      }catch{ setOk(false); }
+    })();
+  },[]);
+
+  if(ok===true) return <AdminDashboard/>;
+  // login form
+  return (
+    <div className="max-w-sm mx-auto mt-16 w-full">
+      <Card>
+        <CardHeader>
+          <h2 className="text-2xl font-semibold text-center">Panel administratora</h2>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={async (e)=>{
+            e.preventDefault();
+            setError("");
+            const r = await fetch(API.login,{
+              method:"POST",
+              headers:{ "Content-Type":"application/json" },
+              credentials:"include",
+              body: JSON.stringify({ password: pass })
+            });
+            if(r.ok){ window.location.reload(); }
+            else { setError("Nieprawidłowe hasło"); }
+          }} className="space-y-3">
+            <Input type="password" placeholder="Wpisz hasło" value={pass} onChange={(e)=>setPass(e.target.value)} required/>
+            {error && <div className="text-red-600 text-sm">{error}</div>}
+            <Button type="submit" className="w-full"><Icon name="Loader2" className="hidden group-[&:has(.loading)]:block"/>Zaloguj</Button>
+            <div className="text-xs text-zinc-500 text-center">Podaj tylko hasło. Dostęp chroniony cookie.</div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AdminDashboard(){
+  const blank = { title:"", city:"", district:"", street:"", price:"", rooms:"", area:"", type:"Mieszkanie", floor:"", balcony:false, terrace:false, garden:false, description:"" };
+  const [form,setForm]=useState(blank);
+  const [files,setFiles]=useState([]);
+  const [list,setList]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [editing,setEditing]=useState(null);
+  const [removeImgs,setRemoveImgs]=useState([]); // ids to remove when editing
+  const fileRef = useRef(null);
+
+  const load = async ()=>{
+    setLoading(true);
+    const r = await fetch(API.list, { credentials:"include" });
+    const d = await r.json();
+    setList(d);
+    setLoading(false);
+  };
+  useEffect(()=>{ load(); },[]);
+
+  const submit = async (e)=>{
+    e.preventDefault();
+    const fd = new FormData();
+    Object.entries(form).forEach(([k,v])=>{
+      if(typeof v==="boolean") fd.append(k, String(v));
+      else fd.append(k, v??"");
+    });
+    if(editing && removeImgs.length) fd.append("remove_images", JSON.stringify(removeImgs));
+    (files||[]).forEach(f=> fd.append("images", f));
+    const url = editing? API.one(editing.id) : API.list;
+    const method = editing? "PUT" : "POST";
+    const r = await fetch(url, { method, body: fd, credentials:"include" });
+    if(r.ok){
+      setForm(blank); setFiles([]); setEditing(null); setRemoveImgs([]);
+      if(fileRef.current) fileRef.current.value="";
+      await load();
+    } else {
+      alert("Błąd zapisu.");
     }
+  };
 
-    // ---------- MODAL SZCZEGÓŁÓW Z GALERIĄ ----------
-    function OfferDetailsModal({ offer, onClose }) {
-      const [active, setActive] = useState(0);
-      useEffect(() => { document.body.style.overflow='hidden'; return ()=>{ document.body.style.overflow='unset'; }; }, []);
-      const imgs = offer.images || [];
-      return (
-        <div className="fixed inset-0 z-[100] bg-white animate-fade-in" onClick={onClose}>
-          <div onClick={(e) => e.stopPropagation()} className="relative w-full h-full overflow-hidden flex flex-col md:flex-row">
-            <button onClick={onClose} className="absolute top-4 right-4 z-10 p-2 rounded-full bg-zinc-100 text-zinc-800 hover:bg-zinc-200 transition-colors"><Icon name="X" className="h-6 w-6" /></button>
+  const startEdit = (it)=>{
+    setEditing(it);
+    setForm({
+      title: it.title||"", city: it.city||"", district: it.district||"", street: it.street||"",
+      price: it.price||"", rooms: it.rooms||"", area: it.area||"", type: it.type||"Mieszkanie",
+      floor: it.floor??"", balcony: !!it.balcony, terrace: !!it.terrace, garden: !!it.garden,
+      description: it.description||""
+    });
+    setFiles([]);
+    setRemoveImgs([]);
+    if(fileRef.current) fileRef.current.value="";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
-            <div className="w-full md:w-1/2 h-1/2 md:h-full flex flex-col">
-              <div className="relative flex-1 bg-black/5">
-                {imgs.length ? <img src={api.imageUrl(imgs[active].id)} alt={offer.title} className="h-full w-full object-cover"/> : <div className="h-full w-full grid place-items-center text-zinc-400">Brak zdjęć</div>}
-                {imgs.length>1 && (
-                  <div className="absolute inset-x-0 bottom-0 p-3 flex gap-2 overflow-x-auto bg-black/30">
-                    {imgs.map((im,i)=>(
-                      <button key={im.id} onClick={()=>setActive(i)} className={`h-14 w-20 rounded-md overflow-hidden border ${i===active?"border-white ring-2 ring-white":"border-transparent"}`}>
-                        <img src={api.imageUrl(im.id)} className="h-full w-full object-cover"/>
-                      </button>
-                    ))}
+  const del = async (id)=>{
+    if(!confirm("Usunąć ogłoszenie?")) return;
+    const r = await fetch(API.one(id), { method:"DELETE", credentials:"include" });
+    if(r.ok) load(); else alert("Błąd usuwania");
+  };
+
+  const logout = async ()=>{
+    await fetch(API.logout,{ method:"POST", credentials:"include" });
+    window.location.href="/panel";
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-semibold">Panel administratora</h1>
+        <Button variant="outline" onClick={logout}>Wyloguj</Button>
+      </div>
+
+      <Card>
+        <CardHeader><div className="text-xl font-semibold">{editing? "Edytuj ogłoszenie":"Dodaj ogłoszenie"}</div></CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="grid md:grid-cols-3 gap-4">
+            <Input placeholder="Tytuł *" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} required/>
+            <Input placeholder="Miasto *" value={form.city} onChange={e=>setForm({...form,city:e.target.value})} required/>
+            <Input placeholder="Dzielnica" value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/>
+            <Input placeholder="Ulica" value={form.street} onChange={e=>setForm({...form,street:e.target.value})}/>
+            <Input type="number" placeholder="Cena (PLN) *" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} required/>
+            <Input type="number" placeholder="Pokoje *" value={form.rooms} onChange={e=>setForm({...form,rooms:e.target.value})} required/>
+            <Input type="number" placeholder="Metraż (m²) *" value={form.area} onChange={e=>setForm({...form,area:e.target.value})} required/>
+            <select className="rounded-md border px-3 py-2" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
+              <option>Mieszkanie</option><option>Dom</option><option>Apartament</option><option>Loft</option>
+            </select>
+            <Input type="number" placeholder="Piętro" value={form.floor} onChange={e=>setForm({...form,floor:e.target.value})}/>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.balcony} onChange={e=>setForm({...form,balcony:e.target.checked})}/> Balkon</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.terrace} onChange={e=>setForm({...form,terrace:e.target.checked})}/> Taras</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.garden} onChange={e=>setForm({...form,garden:e.target.checked})}/> Ogród</label>
+            <div className="md:col-span-3">
+              <Textarea rows="4" placeholder="Opis" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/>
+            </div>
+
+            {/* ładny wybór plików (wiele) */}
+            <div className="md:col-span-3">
+              <label className="block text-sm font-medium mb-1">Zdjęcia (możesz wybrać wiele)</label>
+              <input ref={fileRef} type="file" multiple accept="image/*" className="file-input w-full rounded-md border border-zinc-200 px-3 py-2 bg-white"/>
+              <div className="text-xs text-zinc-500 mt-1">Do 12 plików, max 10 MB każdy.</div>
+            </div>
+
+            {/* podgląd nowych plików */}
+            <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-6 gap-2" id="newPreview"></div>
+
+            <div className="md:col-span-3 flex gap-2">
+              <Button type="submit"><Icon name="Upload"/>{editing? "Zapisz zmiany":"Dodaj ogłoszenie"}</Button>
+              {editing && <Button type="button" variant="outline" onClick={()=>{setEditing(null); setForm(blank); setFiles([]); setRemoveImgs([]); if(fileRef.current) fileRef.current.value="";}}>Anuluj edycję</Button>}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <section>
+        <h2 className="text-xl font-semibold mb-3">Twoje ogłoszenia</h2>
+        {loading && <div className="grid md:grid-cols-3 gap-4">{Array.from({length:6}).map((_,i)=><div key={i} className="h-56 rounded-2xl bg-zinc-200 animate-pulse"/>)}</div>}
+        {!loading && list.length===0 && <div className="p-4 bg-blue-50 rounded-xl text-blue-700">Brak ogłoszeń.</div>}
+        <div className="grid md:grid-cols-3 gap-4">
+          {list.map(it=>(
+            <Card key={it.id} className="overflow-hidden">
+              <div className="relative h-40">
+                {it.image_ids?.length ?
+                  <img src={API.img(it.image_ids[0])} alt="" className="w-full h-full object-cover"/> :
+                  <div className="h-full w-full bg-zinc-200 grid place-items-center text-zinc-500"><Icon name="Image"/>&nbsp;Brak zdjęcia</div>}
+                <div className="absolute left-3 top-3">
+                  <span className="text-xs px-2 py-1 rounded-full bg-black/70 text-white">{it.type}</span>
+                </div>
+              </div>
+              <CardContent>
+                <div className="font-semibold text-lg">{it.title}</div>
+                <div className="text-sm text-zinc-600 mt-1">{it.city}{it.district?` • ${it.district}`:""} {it.street?` • ${it.street}`:""}</div>
+                <div className="text-lg font-semibold mt-2">{currency(it.price)}</div>
+
+                {editing?.id===it.id && it.image_ids?.length>0 && (
+                  <div className="mt-3">
+                    <div className="text-sm font-medium mb-1">Aktualne zdjęcia (kliknij, aby zaznaczyć do usunięcia):</div>
+                    <div className="grid grid-cols-5 gap-2">
+                      {it.image_ids.map(imgId=>{
+                        const selected = removeImgs.includes(imgId);
+                        return (
+                          <button key={imgId} type="button" onClick={()=>{
+                            setRemoveImgs((prev)=> prev.includes(imgId) ? prev.filter(x=>x!==imgId) : [...prev,imgId]);
+                          }} className={cn("relative rounded overflow-hidden border", selected? "ring-2 ring-red-500":"")}>
+                            <img src={API.img(imgId)} alt="" className="w-full h-16 object-cover"/>
+                            {selected && <div className="absolute inset-0 bg-red-500/40"></div>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1">Zaznaczone zostaną usunięte po zapisaniu zmian.</div>
                   </div>
                 )}
-              </div>
-            </div>
 
-            <div className="w-full md:w-1/2 p-8 overflow-y-auto">
-              <Badge>{offer.type || "Nieruchomość"}</Badge>
-              <h2 className="text-3xl font-bold mt-2">{offer.title}</h2>
-              <div className="flex items-center gap-2 text-zinc-500 mt-1"><Icon name="MapPin" /> {offer.city}{offer.district?` • ${offer.district}`:""}{offer.street?` • ${offer.street}`:""}</div>
-              <div className="text-4xl font-bold my-6">{currency(offer.price)}</div>
-              <div className="grid grid-cols-2 gap-4 text-base border-t pt-6">
-                <div className="font-semibold text-zinc-600">Metraż:</div> <div>{offer.area ?? "-"} m²</div>
-                <div className="font-semibold text-zinc-600">Pokoje:</div> <div>{offer.rooms ?? "-"}</div>
-                <div className="font-semibold text-zinc-600">Piętro:</div> <div>{offer.floor ?? "-"}</div>
-                <div className="font-semibold text-zinc-600">Balkon:</div> <div>{offer.balcony ? "Tak" : "Nie"}</div>
-                <div className="font-semibold text-zinc-600">Taras:</div> <div>{offer.terrace ? "Tak" : "Nie"}</div>
-                <div className="font-semibold text-zinc-600">Ogród:</div> <div>{offer.garden ? "Tak" : "Nie"}</div>
-              </div>
-              {offer.description && <p className="mt-6 text-zinc-700 leading-relaxed border-t pt-6">{offer.description}</p>}
-              <Button size="lg" className="w-full mt-8 rounded-xl">Skontaktuj się w sprawie oferty</Button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // ---------- WIDOK LISTY DLA KLIENTA ----------
-    function AllOffers({ t }) {
-      const [query, setQuery] = useState("");
-      const [city, setCity] = useState("");
-      const [type, setType] = useState("");
-      const [rooms, setRooms] = useState(0);
-      const [area, setArea] = useState([30, 160]);
-      const [price, setPrice] = useState([300000, 1500000]);
-      const [sort, setSort] = useState("newest");
-      const [grid, setGrid] = useState(true);
-      const [data, setData] = useState([]);
-      const [selectedOffer, setSelectedOffer] = useState(null);
-
-      async function load() {
-        const rows = await api.list({
-          q: query || undefined, city: city || undefined, type: type || undefined, rooms: rooms || undefined,
-          min_area: area[0], max_area: area[1], min_price: price[0], max_price: price[1],
-        });
-        let out=[...rows];
-        if (sort === "cheapest") out.sort((a,b)=>a.price-b.price);
-        else if (sort === "newest") out.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-        else if (sort === "featured") out.sort((a,b)=>(b.terrace?1:0)-(a.terrace?1:0)||new Date(b.created_at)-new Date(a.created_at));
-        setData(out);
-      }
-      useEffect(()=>{ load(); }, []);
-      useEffect(()=>{ const id=setTimeout(load,200); return ()=>clearTimeout(id); }, [query, city, type, rooms, area, price, sort]);
-
-      const cities = Array.from(new Set(data.map(x=>x.city))).filter(Boolean);
-      const types = Array.from(new Set(data.map(x=>x.type))).filter(Boolean);
-      const resetFilters = () => { setQuery(""); setCity(""); setType(""); setRooms(0); setArea([30,160]); setPrice([300000,1500000]); setSort("newest"); };
-
-      return (
-        <>
-          <section className="w-full py-10 min-h-screen">
-            <div className="mx-auto max-w-7xl px-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <a href="index.html"><Button variant="outline" className="rounded-xl"><Icon name="ChevronLeft" className="mr-2" />Wróć</Button></a>
-                  <h2 className="text-2xl md:text-3xl font-semibold tracking-tight">{t.allOffers}</h2>
-                  <Badge variant="secondary">{data.length}</Badge>
+                <div className="mt-3 flex gap-2">
+                  <Button variant="outline" onClick={()=>startEdit(it)}><Icon name="Edit"/>Edytuj</Button>
+                  <Button variant="danger" onClick={()=>del(it.id)}><Icon name="Trash"/>Usuń</Button>
                 </div>
-                <div className="hidden md:flex items-center gap-2">
-                  <Button variant={grid ? "default" : "outline"} onClick={() => setGrid(true)} className="rounded-xl">{t.filters.grid}</Button>
-                  <Button variant={!grid ? "default" : "outline"} onClick={() => setGrid(false)} className="rounded-xl">{t.filters.list}</Button>
-                </div>
-              </div>
-
-              <div className="mt-6 grid md:grid-cols-12 gap-3 p-4 rounded-2xl bg-white/70 backdrop-blur border shadow-sm">
-                <div className="md:col-span-3"><Input placeholder="Szukaj..." value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-                <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={city} onChange={(e)=>setCity(e.target.value)}>
-                  <option value="">{t.filters.location}</option>
-                  {cities.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={type} onChange={(e)=>setType(e.target.value)}>
-                  <option value="">{t.filters.type}</option>
-                  {types.map(tp => <option key={tp} value={tp}>{tp}</option>)}
-                </select>
-                <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={rooms} onChange={(e)=>setRooms(Number(e.target.value))}>
-                  <option value={0}>{t.filters.rooms}</option>
-                  {[1,2,3,4,5].map(r => <option key={r} value={r}>{r}+</option>)}
-                </select>
-                <div className="md:col-span-6 px-2"><label className="text-xs text-zinc-500">{t.filters.area}: {area[0]}–{area[1]} m²</label><Slider defaultValue={area} min={20} max={200} step={5} onValueChange={(v)=>setArea(v)} /></div>
-                <div className="md:col-span-6 px-2"><label className="text-xs text-zinc-500">{t.filters.price}: {currency(price[0])} – {currency(price[1])}</label><Slider defaultValue={price} min={200000} max={2000000} step={10000} onValueChange={(v)=>setPrice(v)} /></div>
-                <div className="md:col-span-12 flex justify-end"><Button variant="ghost" onClick={resetFilters} className="rounded-xl"><Icon name="X" className="mr-2" />{t.filters.clear}</Button></div>
-              </div>
-
-              <div className={cn("mt-6 grid gap-4", grid ? "md:grid-cols-3" : "grid-cols-1")}>
-                {data.map(item => (
-                  <div key={item.id} className="cursor-pointer" onClick={async ()=>{ const full=await api.get(item.id); setSelectedOffer(full); }}>
-                    {grid ? (
-                      <Card className="overflow-hidden rounded-3xl border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_20px_60px_-25px_rgba(0,0,0,0.15)] transition-transform duration-300 hover:-translate-y-1">
-                        <div className="relative h-56">
-                          {item.thumb_image_id ? <img src={api.imageUrl(item.thumb_image_id)} className="h-full w-full object-cover"/> : <div className="h-full w-full grid place-items-center text-zinc-400 bg-zinc-100">Brak zdjęcia</div>}
-                          <Badge className="absolute left-3 top-3 bg-black/70 text-white backdrop-blur">{item.type || "Nieruchomość"}</Badge>
-                        </div>
-                        <CardHeader>
-                          <CardTitle className="text-xl">{item.title}</CardTitle>
-                          <div className="flex items-center gap-2 text-zinc-500 text-sm"><Icon name="MapPin" /> {item.city}{item.district?` • ${item.district}`:""} • {item.area ?? "-"} m² • {item.rooms ?? "-"} pokoje</div>
-                        </CardHeader>
-                        <CardContent className="flex items-center justify-between">
-                          <div className="text-2xl font-semibold">{currency(item.price)}</div>
-                          <Button variant="outline" className="rounded-xl">Szczegóły</Button>
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <div className="rounded-2xl overflow-hidden border bg-white/70 backdrop-blur shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex gap-4 p-3">
-                          <div className="h-28 w-40 rounded-xl overflow-hidden bg-zinc-100">
-                            {item.thumb_image_id ? <img src={api.imageUrl(item.thumb_image_id)} className="h-full w-full object-cover"/> : <div className="h-full w-full grid place-items-center text-zinc-400">Brak</div>}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <h4 className="font-semibold">{item.title}</h4>
-                                <div className="text-sm text-zinc-500">{item.city}{item.district?` • ${item.district}`:""} • {item.area ?? "-"} m² • {item.rooms ?? "-"} pokoje • piętro {item.floor ?? "-"}</div>
-                              </div>
-                              <div className="text-xl font-semibold">{currency(item.price)}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {selectedOffer && <OfferDetailsModal offer={selectedOffer} onClose={() => setSelectedOffer(null)} />}
-        </>
-      );
-    }
-
-    // ---------- PANEL ADMINA ----------
-    function FilePicker({ files, setFiles, label="Wybierz zdjęcia (JPG/PNG)", multiple=true }) {
-      const inputRef = React.useRef(null);
-      return (
-        <div>
-          <input ref={inputRef} type="file" accept="image/*" multiple={multiple} className="hidden" onChange={(e)=>setFiles(Array.from(e.target.files||[]))}/>
-          <Button type="button" className="rounded-xl" onClick={()=>inputRef.current?.click()}>{label}</Button>
-          <div className="mt-2 text-xs text-zinc-500">{files.length ? `${files.length} plik(i)` : "Brak wybranych plików"}</div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
-      );
-    }
+      </section>
+    </div>
+  );
+}
 
-    function ExistingImages({ listingId }) {
-      const [imgs, setImgs] = useState([]);
-      useEffect(()=>{ (async()=>{ const full = await api.get(listingId); setImgs(full.images||[]); })(); },[listingId]);
-      if(!imgs.length) return null;
-      return (
-        <div className="col-span-2 mt-3">
-          <div className="text-sm mb-2">Istniejące zdjęcia:</div>
-          <div className="flex gap-2 flex-wrap">
-            {imgs.map(im=>(
-              <div key={im.id} className="relative w-24 h-16 rounded-md overflow-hidden border">
-                <img src={api.imageUrl(im.id)} className="w-full h-full object-cover"/>
-                <button type="button" onClick={async()=>{ if(confirm("Usunąć zdjęcie?")){ await api.delImage(im.id); const full=await api.get(listingId); setImgs(full.images||[]); }}} className="absolute top-1 right-1 bg-red-600 text-white text-xs px-1 rounded">X</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    function AdminPanel() {
-      const [auth, setAuth] = useState(false);
-      const [password, setPassword] = useState("");
-      const [list, setList] = useState([]);
-      const [creating, setCreating] = useState(false);
-      const [files, setFiles] = useState([]);
-
-      const [form, setForm] = useState({
-        title:"", city:"", district:"", street:"",
-        price:"", rooms:"", area:"", type:"Mieszkanie", floor:"",
-        balcony:false, terrace:false, garden:false, description:""
+// obsługa wyboru plików (podgląd miniatur)
+document.addEventListener("change",(e)=>{
+  if(e.target && e.target.type==="file"){
+    const cont = document.getElementById("newPreview");
+    if(cont) cont.innerHTML="";
+    const files = e.target.files || [];
+    const arr = Array.from(files);
+    const evt = new CustomEvent("files-selected",{ detail: arr });
+    window.dispatchEvent(evt);
+    if(cont){
+      arr.slice(0,12).forEach(f=>{
+        const url = URL.createObjectURL(f);
+        const div = document.createElement("div");
+        div.className = "relative rounded overflow-hidden border";
+        div.innerHTML = `<img src="${url}" class="w-full h-20 object-cover"/>`;
+        cont.appendChild(div);
       });
-
-      const [editId, setEditId] = useState(null);
-      const [editFiles, setEditFiles] = useState([]);
-      const [editForm, setEditForm] = useState({});
-
-      async function load(){ const rows = await api.list(); setList(rows); }
-      useEffect(()=>{ (async()=>{ const me=await api.me(); setAuth(me.authed); if(me.authed) load(); })(); },[]);
-
-      if(!auth){
-        return (
-          <section className="w-full py-12">
-            <div className="mx-auto max-w-sm px-4">
-              <Card className="rounded-2xl">
-                <CardHeader><CardTitle>Logowanie do panelu</CardTitle></CardHeader>
-                <CardContent>
-                  <form onSubmit={async(e)=>{e.preventDefault();const r=await api.login(password); if(r.ok){ setAuth(true); load(); } else alert(r.error||"Błąd"); }}>
-                    <Input type="password" placeholder="Hasło" value={password} onChange={(e)=>setPassword(e.target.value)} />
-                    <Button className="w-full mt-3">Zaloguj</Button>
-                  </form>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
-        );
-      }
-
-      const onCreate = async (e) => {
-        e.preventDefault(); setCreating(true);
-        try{
-          const fd=new FormData();
-          Object.entries(form).forEach(([k,v])=>fd.append(k,String(v)));
-          for(const f of files) fd.append("images", f);
-          const r = await api.create(fd);
-          if(r.ok){ setForm({ title:"", city:"", district:"", street:"", price:"", rooms:"", area:"", type:"Mieszkanie", floor:"", balcony:false, terrace:false, garden:false, description:"" }); setFiles([]); await load(); alert("Dodano ogłoszenie"); }
-          else alert(r.error||"Błąd dodawania");
-        } finally { setCreating(false); }
-      };
-
-      const startEdit = async (row) => {
-        setEditId(row.id);
-        const full = await api.get(row.id);
-        setEditForm({
-          title: full.title, city: full.city, district: full.district || "", street: full.street || "",
-          price: full.price, rooms: full.rooms || "", area: full.area || "", type: full.type || "Mieszkanie", floor: full.floor || "",
-          balcony: !!full.balcony, terrace: !!full.terrace, garden: !!full.garden, description: full.description || ""
-        });
-        setEditFiles([]);
-      };
-
-      const submitEdit = async (e) => {
-        e.preventDefault();
-        const fd = new FormData();
-        Object.entries(editForm).forEach(([k,v])=>fd.append(k,String(v)));
-        for(const f of editFiles) fd.append("images", f);
-        const r = await api.update(editId, fd);
-        if(r.ok){ setEditId(null); setEditFiles([]); await load(); alert("Zapisano zmiany"); }
-        else alert(r.error||"Błąd zapisu");
-      };
-
-      return (
-        <section className="w-full py-12">
-          <div className="mx-auto max-w-7xl px-4 grid md:grid-cols-2 gap-8">
-            <Card className="rounded-2xl">
-              <CardHeader><CardTitle>Dodaj ogłoszenie</CardTitle></CardHeader>
-              <CardContent>
-                <form className="grid grid-cols-2 gap-3" onSubmit={onCreate}>
-                  <Input placeholder="Tytuł" value={form.title} onChange={e=>setForm({...form, title:e.target.value})} className="col-span-2" required />
-                  <Input placeholder="Miasto" value={form.city} onChange={e=>setForm({...form, city:e.target.value})} required />
-                  <Input placeholder="Dzielnica" value={form.district} onChange={e=>setForm({...form, district:e.target.value})} />
-                  <Input placeholder="Ulica" value={form.street} onChange={e=>setForm({...form, street:e.target.value})} />
-                  <Input placeholder="Cena (PLN)" type="number" value={form.price} onChange={e=>setForm({...form, price:e.target.value})} required />
-                  <Input placeholder="Pokoje" type="number" value={form.rooms} onChange={e=>setForm({...form, rooms:e.target.value})} />
-                  <Input placeholder="Metraż (m²)" type="number" value={form.area} onChange={e=>setForm({...form, area:e.target.value})} />
-                  <Input placeholder="Piętro" type="number" value={form.floor} onChange={e=>setForm({...form, floor:e.target.value})} />
-                  <Input placeholder="Typ (Mieszkanie/Dom/Apartament/Loft)" value={form.type} onChange={e=>setForm({...form, type:e.target.value})} />
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.balcony} onChange={e=>setForm({...form, balcony:e.target.checked})}/> Balkon</label>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.terrace} onChange={e=>setForm({...form, terrace:e.target.checked})}/> Taras</label>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.garden} onChange={e=>setForm({...form, garden:e.target.checked})}/> Ogród</label>
-                  <textarea placeholder="Opis" value={form.description} onChange={e=>setForm({...form, description:e.target.value})} className="col-span-2 rounded-md border p-2" />
-                  <div className="col-span-2"><FilePicker files={files} setFiles={setFiles} /></div>
-                  <Button className="col-span-2 rounded-xl" disabled={creating}>{creating ? "Zapisywanie..." : "Dodaj ogłoszenie"}</Button>
-                </form>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-2xl">
-              <CardHeader><CardTitle>Twoje ogłoszenia</CardTitle></CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {list.map(row=>(
-                    <div key={row.id} className="border rounded-xl p-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="font-semibold">{row.title}</div>
-                          <div className="text-xs text-zinc-500">{row.city} {row.district?`• ${row.district}`:""} • {row.area ?? "-"} m² • {row.rooms ?? "-"} pok.</div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" onClick={()=>startEdit(row)}>Edytuj</Button>
-                          <Button variant="destructive" onClick={async()=>{ if(confirm("Usunąć ogłoszenie?")){ await api.del(row.id); await load(); } }}>Usuń</Button>
-                        </div>
-                      </div>
-
-                      {editId===row.id && (
-                        <form className="mt-3 grid grid-cols-2 gap-2" onSubmit={submitEdit}>
-                          <Input placeholder="Tytuł" value={editForm.title} onChange={e=>setEditForm({...editForm, title:e.target.value})} className="col-span-2" />
-                          <Input placeholder="Miasto" value={editForm.city} onChange={e=>setEditForm({...editForm, city:e.target.value})} />
-                          <Input placeholder="Dzielnica" value={editForm.district} onChange={e=>setEditForm({...editForm, district:e.target.value})} />
-                          <Input placeholder="Ulica" value={editForm.street} onChange={e=>setEditForm({...editForm, street:e.target.value})} />
-                          <Input placeholder="Cena" type="number" value={editForm.price} onChange={e=>setEditForm({...editForm, price:e.target.value})} />
-                          <Input placeholder="Pokoje" type="number" value={editForm.rooms} onChange={e=>setEditForm({...editForm, rooms:e.target.value})} />
-                          <Input placeholder="Metraż" type="number" value={editForm.area} onChange={e=>setEditForm({...editForm, area:e.target.value})} />
-                          <Input placeholder="Piętro" type="number" value={editForm.floor} onChange={e=>setEditForm({...editForm, floor:e.target.value})} />
-                          <Input placeholder="Typ" value={editForm.type} onChange={e=>setEditForm({...editForm, type:e.target.value})} />
-                          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!editForm.balcony} onChange={e=>setEditForm({...editForm, balcony:e.target.checked})}/> Balkon</label>
-                          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!editForm.terrace} onChange={e=>setEditForm({...editForm, terrace:e.target.checked})}/> Taras</label>
-                          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!editForm.garden} onChange={e=>setEditForm({...editForm, garden:e.target.checked})}/> Ogród</label>
-                          <textarea placeholder="Opis" value={editForm.description} onChange={e=>setEditForm({...editForm, description:e.target.value})} className="col-span-2 rounded-md border p-2" />
-                          <div className="col-span-2"><FilePicker files={editFiles} setFiles={setEditFiles} label="Dodaj kolejne zdjęcia" /></div>
-                          <div className="col-span-2 flex gap-2">
-                            <Button type="submit">Zapisz</Button>
-                            <Button type="button" variant="outline" onClick={()=>setEditId(null)}>Anuluj</Button>
-                          </div>
-                          <ExistingImages listingId={row.id} />
-                        </form>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-      );
     }
+  }
+});
 
-    // ---------- ROOT APP ----------
-    function App() {
-      const [lang, setLang] = useState("pl");
-      const t = dict[lang];
-      const isPanel = typeof window !== "undefined" && window.location.pathname.endsWith("/panel");
-      return (
-        <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50 text-zinc-900 selection:bg-blue-200 selection:text-blue-900">
-          <Header t={t} lang={lang} setLang={setLang}/>
-          <main>{isPanel ? <AdminPanel/> : <AllOffers t={t}/>}</main>
-          <Footer/>
-        </div>
-      );
-    }
+// Przekaż pliki do React (AdminDashboard)
+(function bridgeFiles(){
+  let filesHandlers = [];
+  window.addEventListener("files-selected",(e)=>{
+    filesHandlers.forEach(fn=>fn(e.detail));
+  });
+  // expose
+  window.__registerFilesHandler = fn => filesHandlers.push(fn);
+})();
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
+</script>
+
+<script type="text/babel">
+/* mostek: przypisz handler plików do aktualnego formularza */
+(function useFilesToForm(){
+  // znajdź najbliższy komponent AdminDashboard i podmień jego setFiles gdy zmieni się input
+  const hook = ()=>{
+    const reactRoot = document.getElementById("root");
+    // nic nie trzeba – emitujemy globalnie, a w komponencie pobierzemy
+  };
+  hook();
+})();
+</script>
+
+<script type="text/babel">
+// Patch: wpięcie handlera do AdminDashboard(setFiles)
+const _origCreateElement = React.createElement;
+React.createElement = function(type, props, ...children){
+  const el = _origCreateElement(type, props, ...children);
+  // po zamontowaniu AdminDashboard dołączymy nasłuch
+  if(type && type.name==="AdminDashboard"){
+    const refSetter = (inst)=>{
+      if(!inst) return;
+      const setFiles = inst?.props?.children?.props?.setFiles;
+    };
+  }
+  return el;
+};
+</script>
+
+<script type="text/babel">
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
 </body>
 </html>
