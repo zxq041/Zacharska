@@ -89,11 +89,32 @@
     const Input = ({ className, ...props }) => <input className={cn("flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50", className)} {...props} />;
 
     // ---------- DANE Z ZEWNĄTRZ ----------
+    // Do 20 opinii. Każda: { name, avatar (URL do zdjęcia z Facebooka), quote }
+    // Wystarczy uzupełnić poniższe obiekty własnymi danymi (zdjęcie publiczne z Facebooka, imię i nazwisko, tekst).
     const TESTIMONIALS = [
-      { name: "Anna Kowalska", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=400&auto=format&fit=crop", rating: 5, quote: "Profesjonalizm na każdym etapie – znaleźli dla nas idealny apartament." },
-      { name: "Marek Nowak", avatar: "https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?q=80&w=400&auto=format&fit=crop", rating: 5, quote: "Świetny kontakt i wsparcie. Czułem, że jestem w dobrych rękach." },
-      { name: "Ewa Zielińska", avatar: "https://images.unsplash.com/photo-1549161099-5c5a8a4cfb03?q=80&w=400&auto=format&fit=crop", rating: 4, quote: "Piękne portfolio nieruchomości i realne doradztwo inwestycyjne." }
-    ];
+      { name: "Anna Kowalska", avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=400&auto=format&fit=crop", quote: "Profesjonalizm na każdym etapie – znaleźli dla nas idealny apartament." },
+      { name: "Marek Nowak", avatar: "https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?q=80&w=400&auto=format&fit=crop", quote: "Świetny kontakt i wsparcie. Czułem, że jestem w dobrych rękach." },
+      { name: "Ewa Zielińska", avatar: "https://images.unsplash.com/photo-1549161099-5c5a8a4cfb03?q=80&w=400&auto=format&fit=crop", quote: "Piękne portfolio nieruchomości i realne doradztwo inwestycyjne." },
+      // --- Uzupełnij maksymalnie do 20 pozycji ---
+      // { name: "Twoje Imię i Nazwisko", avatar: "https://facebook.com/…/photo.jpg", quote: "Twój tekst opinii…" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+      // { name: "", avatar: "", quote: "" },
+    ].slice(0, 20);
+
     const FACEBOOK_REELS = [
       { id: 1, src: "https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1990065958197943%2F&show_text=false&width=267&t=0" },
       { id: 2, src: "https://www.facebook.com/plugins/video.php?height=476&href=https%3A%2F%2Fwww.facebook.com%2Freel%2F1477845613236934%2F&show_text=false&width=267&t=0" },
@@ -139,7 +160,7 @@
             <BestOffers t={t} favs={favs} toggleFav={toggleFav} listings={listings} loading={loading} error={error} />
             <Shorts t={t} />
             <About t={t} />
-            <Testimonials t={t} />
+            <TestimonialsCarousel t={t} />
             <Contact t={t} />
           </main>
           <Footer />
@@ -169,7 +190,6 @@
               <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}>
                 <Icon name="Languages" /> {lang.toUpperCase()}
               </Button>
-              {/* Usunięto: przycisk logowania */}
             </nav>
             <div className="md:hidden flex items-center gap-2">
               <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}>
@@ -272,7 +292,7 @@
           <Card className="overflow-hidden rounded-3xl border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_20px_60px_-25px_rgba(0,0,0,0.15)] transition-transform duration-300 group-hover:-translate-y-1">
             <div className="relative h-56">
               <img src={img} alt={data.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <button onClick={onFav} className={cn("absolute top-3 right-3 p-2 rounded-xl transition-all", fav ? "bg-red-500 text-white" : "bg-white/80 text-zinc-800 hover:bg-white")}>
+              <button onClick={onFav} className={cn("absolute top-3 right-3 p-2 rounded-xl transition-all", fav ? "bg-red-500 text-white" : "bg-white/80 text-zinc-800 hover:bg-white")}> 
                 <Icon name="Heart" className={cn("h-4 w-4", fav && "fill-current")} />
               </button>
               <span className="absolute left-3 top-3 bg-black/70 text-white text-xs font-semibold px-2.5 py-0.5 rounded-full backdrop-blur">{data.type}</span>
@@ -337,7 +357,6 @@
               </div>
             </div>
 
-            {/* Animacje + name-tagi przywrócone */}
             <div className="flex justify-center items-center -space-x-12 md:-space-x-16 h-96">
               <div className="relative transition-transform duration-300 hover:scale-105">
                 <img src="https://i.imgur.com/g9YnvTq.png" alt="Marcin Zacharski" className="w-48 md:w-60 aspect-[9/16] object-cover rounded-2xl shadow-lg border-4 border-white"/>
@@ -363,25 +382,102 @@
       );
     }
 
-    // ---------- TESTIMONIALS ----------
-    function Testimonials({ t }) {
+    // ---------- TESTIMONIALS (KARUZELA) ----------
+    function TestimonialsCarousel({ t }) {
+      const FILLED = TESTIMONIALS.filter(x => x && x.name && x.quote && x.avatar).slice(0, 20);
+      const [index, setIndex] = useState(0);
+      const trackRef = useRef(null);
+      const touch = useRef({ x: 0, y: 0, active: false });
+
+      const prev = () => setIndex(i => (i - 1 + FILLED.length) % FILLED.length);
+      const next = () => setIndex(i => (i + 1) % FILLED.length);
+
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.key === 'ArrowLeft') prev();
+          if (e.key === 'ArrowRight') next();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [FILLED.length]);
+
+      const onTouchStart = (e) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, active: true }; };
+      const onTouchMove = (e) => {
+        if (!touch.current.active) return;
+        const dx = e.touches[0].clientX - touch.current.x;
+        if (Math.abs(dx) > 40) { dx > 0 ? prev() : next(); touch.current.active = false; }
+      };
+      const onTouchEnd = () => { touch.current.active = false; };
+
+      if (FILLED.length === 0) {
+        return (
+          <section id="testimonials" className="w-full py-24">
+            <div className="mx-auto max-w-7xl px-4 text-center">
+              <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.testimonials}</h3>
+              <p className="mt-6 text-zinc-600">Dodaj pierwszą opinię w tablicy <span className="font-mono text-xs bg-zinc-100 px-2 py-1 rounded">TESTIMONIALS</span> (imię i nazwisko, link do zdjęcia z Facebooka, tekst opinii).</p>
+            </div>
+          </section>
+        );
+      }
+
       return (
         <section id="testimonials" className="w-full py-24">
-          <div className="mx-auto max-w-7xl px-4 text-center">
-            <h3 className="text-3xl md:text-4xl font-semibold tracking-tight">{t.testimonials}</h3>
-            <div className="mt-10 grid md:grid-cols-3 gap-6 text-left">
-              {TESTIMONIALS.map((r) => (
-                <Card key={r.name} className="rounded-3xl bg-white/70 backdrop-blur-xl border-zinc-200/70 shadow-[0_20px_60px_-25px_rgba(0,0,0,.2)]">
-                  <CardHeader className="flex-row items-center gap-3">
-                    <img src={r.avatar} className="h-12 w-12 rounded-full object-cover" alt={r.name}/>
-                    <div>
-                      <CardTitle className="text-lg">{r.name}</CardTitle>
-                      <div className="text-yellow-500">{"★".repeat(r.rating)}<span className="text-zinc-300">{"★".repeat(5 - r.rating)}</span></div>
-                    </div>
-                  </CardHeader>
-                  <CardContent><p className="italic">"{r.quote}"</p></CardContent>
-                </Card>
-              ))}
+          <div className="mx-auto max-w-4xl px-4">
+            <h3 className="text-3xl md:text-4xl font-semibold tracking-tight text-center">{t.testimonials}</h3>
+
+            <div className="relative mt-10">
+              {/* Strzałki */}
+              <button aria-label="Poprzednia opinia" onClick={prev} className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 hidden md:flex items-center justify-center h-11 w-11 rounded-full border bg-white/80 backdrop-blur hover:bg-white shadow">
+                <Icon name="ChevronLeft" className="h-5 w-5" />
+              </button>
+              <button aria-label="Następna opinia" onClick={next} className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 hidden md:flex items-center justify-center h-11 w-11 rounded-full border bg-white/80 backdrop-blur hover:bg-white shadow">
+                <Icon name="ChevronRight" className="h-5 w-5" />
+              </button>
+
+              {/* Tor karuzeli */}
+              <div 
+                ref={trackRef}
+                className="overflow-hidden rounded-3xl border border-zinc-200/70 bg-white/70 backdrop-blur-xl shadow-[0_20px_60px_-25px_rgba(0,0,0,.2)]"
+                onTouchStart={onTouchStart}
+                onTouchMove={onTouchMove}
+                onTouchEnd={onTouchEnd}
+              >
+                <div 
+                  className="flex transition-transform duration-500 ease-out"
+                  style={{ transform: `translateX(-${index * 100}%)`, width: `${FILLED.length * 100}%` }}
+                >
+                  {FILLED.map((r, i) => (
+                    <article key={r.name + i} className="w-full shrink-0 px-6 py-8 grid sm:grid-cols-[96px_1fr] gap-5 items-start">
+                      <img src={r.avatar} alt={r.name} className="h-24 w-24 rounded-full object-cover border shadow"/>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-lg font-semibold">{r.name}</h4>
+                          <div className="flex">
+                            {Array.from({length:5}).map((_, s) => (
+                              <svg key={s} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-4 w-4 fill-yellow-400 stroke-yellow-400"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                            ))}
+                          </div>
+                        </div>
+                        <p className="mt-2 italic text-zinc-700">“{r.quote}”</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dots + mobilne strzałki */}
+              <div className="mt-6 flex items-center justify-center gap-3">
+                <Button variant="outline" size="icon" onClick={prev} className="md:hidden rounded-xl"><Icon name="ChevronLeft"/></Button>
+                <div className="flex gap-1">
+                  {FILLED.map((_, i) => (
+                    <button key={i} onClick={() => setIndex(i)} className={cn("h-2.5 w-2.5 rounded-full", i===index ? "bg-blue-600" : "bg-zinc-300 hover:bg-zinc-400")}/>
+                  ))}
+                </div>
+                <Button variant="outline" size="icon" onClick={next} className="md:hidden rounded-xl"><Icon name="ChevronRight"/></Button>
+              </div>
+
+              {/* Info o liczbie slotów */}
+              <p className="mt-3 text-center text-xs text-zinc-500">{FILLED.length}/20 wykorzystanych opinii</p>
             </div>
           </div>
         </section>
