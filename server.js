@@ -1,264 +1,216 @@
-// server.js — wersja finalna bez logowania, z /panel33201 (fix relative assets + redirects)
-const express = require("express");
-const path = require("path");
-const cookieParser = require("cookie-parser");
-const multer = require("multer");
-const pg = require("pg");
-const dotenv = require("dotenv");
-
-dotenv.config();
-
+// server.js
+// Node >=18 (fetch built-in). Requires: express, multer, express-session, uuid
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const session = require('express-session');
+const { v4: uuidv4 } = require('uuid');
 const app = express();
-
-// ====== KONFIGURACJA UPLOADU ======
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 12 },
-});
-
-// ====== KONFIGURACJA BAZY ======
-const { Pool } = pg;
-const connectionString =
-  process.env.DATABASE_URL ||
-  "postgres://postgres:postgres@localhost:5432/postgres";
-
-const pool = new Pool({
-  connectionString,
-  ssl: /localhost|127\.0\.0\.1/.test(connectionString)
-    ? false
-    : { rejectUnauthorized: false },
-});
-
-app.use(cookieParser());
-app.use(express.json({ limit: "5mb" }));
-app.use(express.urlencoded({ extended: true }));
-
-// ====== STATYCZNE PLIKI ======
-// Statyki spod root'a (np. /index.html, /oferty.html, /app.js, /styles.css)
-app.use(express.static(__dirname));
-
-// Dodatkowo: serwuj statyki POD prefiksem /panel33201, żeby relative pathy działały
-// (np. <script src="app.js"> załaduje się jako /panel33201/app.js).
-app.use("/panel33201", express.static(__dirname));
-
-// ====== INICjALIZACJA TABEL ======
-async function initDb() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS listings (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      city TEXT NOT NULL,
-      district TEXT,
-      street TEXT,
-      price INTEGER NOT NULL,
-      rooms INTEGER NOT NULL,
-      area INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      floor INTEGER,
-      balcony BOOLEAN DEFAULT false,
-      terrace BOOLEAN DEFAULT false,
-      garden BOOLEAN DEFAULT false,
-      description TEXT,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS images (
-      id SERIAL PRIMARY KEY,
-      listing_id INTEGER REFERENCES listings(id) ON DELETE CASCADE,
-      mime TEXT NOT NULL,
-      data BYTEA NOT NULL
-    );
-  `);
-
-  console.log("✅ Baza danych gotowa");
-}
-
-initDb().catch((e) => {
-  console.error("❌ Błąd połączenia z bazą:", e);
-  process.exit(1);
-});
-
-// ====== API ZDJĘĆ ======
-app.get("/api/images/:id", async (req, res) => {
-  const { id } = req.params;
-  const { rows } = await pool.query("SELECT mime, data FROM images WHERE id=$1", [id]);
-  if (rows.length === 0) return res.status(404).send("Not found");
-  res.setHeader("Content-Type", rows[0].mime);
-  res.send(rows[0].data);
-});
-
-// ====== API OGŁOSZEŃ ======
-
-// Wszystkie ogłoszenia
-app.get("/api/listings", async (_req, res) => {
-  const { rows } = await pool.query(`
-    SELECT l.*, COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-    FROM listings l
-    LEFT JOIN images i ON i.listing_id = l.id
-    GROUP BY l.id
-    ORDER BY l.created_at DESC;
-  `);
-  res.json(rows);
-});
-
-// Jedno ogłoszenie
-app.get("/api/listings/:id", async (req, res) => {
-  const { id } = req.params;
-  const { rows } = await pool.query(
-    `
-    SELECT l.*, COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
-    FROM listings l
-    LEFT JOIN images i ON i.listing_id = l.id
-    WHERE l.id=$1
-    GROUP BY l.id;
-  `,
-    [id]
-  );
-  if (rows.length === 0) return res.status(404).json({ error: "Nie znaleziono" });
-  res.json(rows[0]);
-});
-
-// Dodaj ogłoszenie (bez logowania, panel ukryty przez URL)
-app.post("/api/listings", upload.array("images", 12), async (req, res) => {
-  try {
-    const {
-      title, city, district, street, price,
-      rooms, area, type, floor, balcony,
-      terrace, garden, description
-    } = req.body;
-
-    const { rows } = await pool.query(
-      `
-      INSERT INTO listings (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-      RETURNING *;
-    `,
-      [
-        title, city, district || null, street || null,
-        Number(price), Number(rooms), Number(area),
-        type, floor ? Number(floor) : null,
-        balcony === "true", terrace === "true", garden === "true",
-        description || null,
-      ]
-    );
-
-    const listing = rows[0];
-
-    if (req.files?.length) {
-      for (const f of req.files) {
-        await pool.query(
-          "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
-          [listing.id, f.mimetype, f.buffer]
-        );
-      }
-    }
-
-    res.status(201).json({ success: true, listing });
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: "Błąd podczas dodawania ogłoszenia" });
-  }
-});
-
-// Edycja ogłoszenia
-app.put("/api/listings/:id", upload.array("images", 12), async (req, res) => {
-  const { id } = req.params;
-  const {
-    title, city, district, street, price,
-    rooms, area, type, floor, balcony,
-    terrace, garden, description, remove_images
-  } = req.body;
-
-  try {
-    await pool.query(
-      `
-      UPDATE listings SET
-      title=$1, city=$2, district=$3, street=$4, price=$5, rooms=$6,
-      area=$7, type=$8, floor=$9, balcony=$10, terrace=$11, garden=$12, description=$13
-      WHERE id=$14;
-    `,
-      [
-        title, city, district || null, street || null,
-        Number(price), Number(rooms), Number(area),
-        type, floor ? Number(floor) : null,
-        balcony === "true", terrace === "true", garden === "true",
-        description || null, id,
-      ]
-    );
-
-    if (remove_images) {
-      let arr = [];
-      try {
-        arr = JSON.parse(remove_images);
-      } catch {}
-      if (Array.isArray(arr) && arr.length) {
-        await pool.query(
-          "DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])",
-          [id, arr]
-        );
-      }
-    }
-
-    if (req.files?.length) {
-      for (const f of req.files) {
-        await pool.query(
-          "INSERT INTO images (listing_id, mime, data) VALUES ($1,$2,$3)",
-          [id, f.mimetype, f.buffer]
-        );
-      }
-    }
-
-    res.json({ success: true });
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: "Błąd aktualizacji" });
-  }
-});
-
-// Usuń ogłoszenie
-app.delete("/api/listings/:id", async (req, res) => {
-  const { id } = req.params;
-  await pool.query("DELETE FROM listings WHERE id=$1", [id]);
-  res.json({ success: true });
-});
-
-// ====== ROUTING STRON ======
-
-// Helper: no-cache dla HTML (zapobiega białym ekranom po deployu przez cache)
-function noCacheHtml(res) {
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-}
-
-// Strona główna
-app.get("/", (_req, res) => {
-  noCacheHtml(res);
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-// Zwykłe oferty
-app.get("/oferty.html", (_req, res) => {
-  noCacheHtml(res);
-  res.sendFile(path.join(__dirname, "oferty.html"));
-});
-
-// Panel administracyjny — renderuj panel dla /panel33201 i dowolnych pod-ścieżek
-app.get(["/panel33201", "/panel33201/*"], (_req, res) => {
-  noCacheHtml(res);
-  res.sendFile(path.join(__dirname, "oferty.html"));
-});
-
-// Przekierowanie starego adresu /panel → /panel33201 (301)
-app.get("/panel", (_req, res) => {
-  res.redirect(301, "/panel33201");
-});
-
-// Healthcheck (dla Railway)
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
-
-// ====== START SERVERA ======
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Serwer działa na porcie ${PORT}`));
+
+// CONFIG
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+const DATA_DIR = path.join(__dirname, 'data');
+const LISTINGS_FILE = path.join(DATA_DIR, 'listings.json');
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '33201';
+
+// Webhook URL (Elfsight / provided)
+const FB_WEBHOOK_URL = process.env.FB_WEBHOOK_URL || 'https://6b71ec7fb3ad4df7b4e6291714fe957f.elf.site';
+
+// Ensure directories exist
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(LISTINGS_FILE)) fs.writeFileSync(LISTINGS_FILE, JSON.stringify([], null, 2), 'utf8');
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'replace_this_with_a_real_secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: false } // if using https set to true
+}));
+
+// Serve static site files
+app.use(express.static(path.join(__dirname))); // serves index.html, panel.html etc.
+
+// Serve uploaded images
+app.use('/uploads', express.static(UPLOAD_DIR));
+
+// Multer storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safe = `${Date.now()}-${uuidv4()}${ext}`;
+    cb(null, safe);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 6 * 1024 * 1024 } }); // 6MB limit per file
+
+// Helpers for listings persistence
+function readListings() {
+  try {
+    const raw = fs.readFileSync(LISTINGS_FILE, 'utf8');
+    return JSON.parse(raw || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+function writeListings(list) {
+  fs.writeFileSync(LISTINGS_FILE, JSON.stringify(list, null, 2), 'utf8');
+}
+
+// Simple auth endpoints (session-based)
+app.post('/api/login', (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
+    req.session.auth = true;
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ error: 'Nieprawidłowe hasło' });
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.get('/api/me', (req, res) => {
+  res.json({ admin: !!req.session.auth });
+});
+
+// Listings endpoints
+app.get('/api/listings', (req, res) => {
+  const list = readListings();
+  res.json(list);
+});
+
+// Upload multiple images: form field name "images[]" (our panel uses this)
+app.post('/api/listings', upload.array('images[]'), (req, res) => {
+  if (!req.session.auth) return res.status(403).json({ error: "Brak autoryzacji" });
+
+  try {
+    const fields = req.body || {};
+    const files = req.files || [];
+
+    // Build images URLs (serve from /uploads)
+    const images = files.map(f => `/uploads/${encodeURIComponent(path.basename(f.filename))}`);
+
+    const newListing = {
+      id: uuidv4(),
+      title: fields.title || '',
+      city: fields.city || '',
+      type: fields.type || '',
+      area: Number(fields.area) || 0,
+      rooms: Number(fields.rooms) || 0,
+      price: Number(fields.price) || 0,
+      floor: fields.floor ? Number(fields.floor) : null,
+      terrace: fields.terrace === 'on' || fields.terrace === 'true' || fields.terrace === '1',
+      garden: fields.garden === 'on' || fields.garden === 'true' || fields.garden === '1',
+      description: fields.description || '',
+      images, // array of paths
+      createdAt: Date.now()
+    };
+
+    const list = readListings();
+    list.unshift(newListing); // newest first
+    writeListings(list);
+
+    res.json(newListing);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Błąd serwera' });
+  }
+});
+
+// Delete listing by id and its images
+app.delete('/api/listings/:id', (req, res) => {
+  if (!req.session.auth) return res.status(403).json({ error: "Brak autoryzacji" });
+  const id = req.params.id;
+  const list = readListings();
+  const idx = list.findIndex(x => x.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Nie znaleziono oferty' });
+
+  const [removed] = list.splice(idx, 1);
+  // remove images from disk
+  if (Array.isArray(removed.images)) {
+    removed.images.forEach(url => {
+      try {
+        const fname = path.basename(url);
+        const fpath = path.join(UPLOAD_DIR, fname);
+        if (fs.existsSync(fpath)) fs.unlinkSync(fpath);
+      } catch (e) {}
+    });
+  }
+  writeListings(list);
+  res.json({ ok: true });
+});
+
+// Proxy /api/facebook-reviews -> your webhook (Elfsight)
+let FB_CACHE = { data: null, ts: 0 };
+const FB_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+app.get('/api/facebook-reviews', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (FB_CACHE.data && (now - FB_CACHE.ts < FB_CACHE_TTL)) {
+      return res.json(FB_CACHE.data);
+    }
+
+    // Proxy the webhook
+    const resp = await fetch(FB_WEBHOOK_URL, { method: 'GET' });
+    if (!resp.ok) {
+      console.warn('Webhook fetch failed', resp.status);
+      return res.json([]);
+    }
+    const json = await resp.json().catch(() => null);
+    // Expect the webhook to return an array of review-like objects.
+    // We'll attempt to normalize to format:
+    // { author_name, rating, text, time, profile_pic, permalink }
+    const items = Array.isArray(json) ? json.map(normalizeWebhookItem) : [];
+
+    FB_CACHE = { data: items, ts: now };
+    res.json(items);
+  } catch (e) {
+    console.error('Error proxying webhook', e);
+    res.json([]);
+  }
+});
+
+function normalizeWebhookItem(src) {
+  // Try several common field names, be permissive
+  const author_name = src.author_name || src.name || src.reviewer || src.user || '';
+  const rating = Number(src.rating || src.stars || (src.recommendation_type === 'positive' ? 5 : (src.recommendation_type === 'negative' ? 1 : 5))) || 0;
+  const text = src.text || src.review_text || src.recommendation_text || src.comment || '';
+  const time = src.time || src.created_time || src.date || 0;
+  const tnum = Number(time) > 1000000000 ? Number(time) : (Date.parse(time) ? Math.floor(Date.parse(time)/1000) : Math.floor(Date.now()/1000));
+  const profile_pic = src.profile_pic || src.photo || (src.reviewer && src.reviewer.picture) || null;
+  const permalink = src.permalink || src.url || null;
+  return { author_name, rating, text, time: tnum, profile_pic, permalink };
+}
+
+// -------------------- CUSTOM PANEL ROUTES --------------------
+// Serve the admin panel under /panel33201 (expects panel.html in project root)
+app.get('/panel33201', (req, res) => {
+  res.sendFile(path.join(__dirname, 'panel.html'));
+});
+
+// Optional convenience redirect
+app.get('/panel', (req, res) => res.redirect('/panel33201'));
+
+// -------------------- FALLBACK (SPA) --------------------
+app.get('*', (req, res, next) => {
+  // let static middleware handle real files
+  const filePath = path.join(__dirname, req.path);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) return next();
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// start server
+app.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(`Admin panel: http://localhost:${PORT}/panel33201`);
+  console.log(`Facebook webhook proxy endpoint: GET http://localhost:${PORT}/api/facebook-reviews => ${FB_WEBHOOK_URL}`);
+});
