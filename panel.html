@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Panel administratora — Centrum nieruchomości</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image" href="/favicon.png">
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial; }
+    .card { border-radius: 1rem; border: 1px solid rgba(0,0,0,.08); background: #fff; box-shadow: 0 10px 30px -20px rgba(0,0,0,.35); }
+    .input { width: 100%; border: 1px solid #e5e7eb; border-radius: .75rem; padding: .5rem .75rem; font-size: .875rem; }
+    .input:focus { outline: none; box-shadow: 0 0 0 2px #3b82f6; border-color: #3b82f6; }
+    .label { font-size: .75rem; font-weight: 600; color: #52525b; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; border-radius: .75rem; padding: .5rem 1rem; font-weight: 600; font-size: .875rem; transition: .2s; }
+    .btn-primary { background: #2563eb; color: #fff; } .btn-primary:hover { background: #1d4ed8; }
+    .btn-outline { border: 1px solid #e5e7eb; } .btn-outline:hover { background: #eff6ff; }
+    .pill { border-radius: 9999px; padding: .125rem .625rem; font-size: .75rem; font-weight: 700; background: #dbeafe; color: #1e3a8a; }
+    .thumb { position: relative; }
+    .thumb button { position: absolute; top: .25rem; right: .25rem; }
+  </style>
+</head>
+<body class="bg-gradient-to-b from-blue-50 via-white to-blue-50 min-h-screen">
+  <div class="max-w-6xl mx-auto p-4 md:p-8">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Panel administratora</h1>
+      <div class="flex items-center gap-2">
+        <a href="/" class="btn btn-outline rounded-xl">← Powrót na stronę</a>
+        <button id="logoutBtn" class="btn btn-outline rounded-xl hidden">Wyloguj</button>
+      </div>
+    </header>
+
+    <!-- LOGOWANIE -->
+    <section id="loginCard" class="card p-6 max-w-md mx-auto">
+      <h2 class="text-lg font-semibold mb-3">Logowanie</h2>
+      <p class="text-sm text-zinc-600 mb-4">Podaj hasło administratora, aby dodać/edytować oferty.</p>
+      <form id="loginForm" class="space-y-3">
+        <div>
+          <label class="label">Hasło</label>
+          <input id="password" type="password" class="input" placeholder="Wpisz hasło (33201)" required />
+        </div>
+        <button class="btn btn-primary w-full rounded-xl">Zaloguj</button>
+      </form>
+      <p id="loginError" class="text-red-600 text-sm mt-3 hidden"></p>
+    </section>
+
+    <!-- FORMULARZ DODAWANIA -->
+    <section id="panelCard" class="card p-6 hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Dodaj nową ofertę</h2>
+        <span class="pill">ADMIN</span>
+      </div>
+
+      <form id="createForm" class="grid md:grid-cols-2 gap-4" enctype="multipart/form-data">
+        <div class="md:col-span-2">
+          <label class="label">Tytuł</label>
+          <input name="title" class="input" placeholder="Np. Apartament w centrum z tarasem" required />
+        </div>
+
+        <div>
+          <label class="label">Lokalizacja (miasto)</label>
+          <input name="city" class="input" placeholder="Np. Słupsk" required />
+        </div>
+
+        <div>
+          <label class="label">Typ</label>
+          <select name="type" class="input" required>
+            <option value="">— wybierz —</option>
+            <option>Mieszkanie</option>
+            <option>Dom</option>
+            <option>Działka</option>
+            <option>Lokal</option>
+            <option>Inne</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="label">Metraż (m²)</label>
+          <input name="area" type="number" min="1" class="input" placeholder="np. 65" required />
+        </div>
+
+        <div>
+          <label class="label">Pokoje (liczba)</label>
+          <input name="rooms" type="number" min="1" class="input" placeholder="np. 3" required />
+        </div>
+
+        <div>
+          <label class="label">Cena (PLN)</label>
+          <input name="price" type="number" min="0" step="1000" class="input" placeholder="np. 650000" required />
+        </div>
+
+        <div>
+          <label class="label">Piętro (opcjonalnie)</label>
+          <input name="floor" type="number" min="-2" class="input" placeholder="np. 2" />
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="label">Zdjęcia (możesz dodać w kilku turach)</label>
+          <!-- NAZWA: images[] + multiple -->
+          <input id="imageInput" name="images[]" type="file" accept="image/*" class="input" multiple required />
+          <div class="text-xs text-zinc-600 mt-1">
+            Maks. 20 plików, do 5 MB każdy.
+            <span id="filesCounter" class="ml-1 font-semibold"></span>
+          </div>
+          <div id="imgPreviewWrap" class="mt-3 flex flex-wrap gap-3"></div>
+        </div>
+
+        <div class="md:col-span-2 flex items-center gap-3">
+          <label class="inline-flex items-center gap-2">
+            <input type="checkbox" name="terrace" class="h-4 w-4"> Taras
+          </label>
+          <label class="inline-flex items-center gap-2">
+            <input type="checkbox" name="garden" class="h-4 w-4"> Ogród
+          </label>
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="label">Opis (opcjonalny)</label>
+          <textarea name="description" class="input" rows="4" placeholder="Krótki opis nieruchomości..."></textarea>
+        </div>
+
+        <div class="md:col-span-2 flex justify-end">
+          <button class="btn btn-primary rounded-xl">Dodaj ofertę</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- LISTA OFERT -->
+    <section id="listCard" class="card p-6 mt-6 hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Aktualne oferty</h2>
+        <span id="countBadge" class="pill">0</span>
+      </div>
+      <div id="listingsWrap" class="grid md:grid-cols-2 gap-4"></div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (s, r=document) => r.querySelector(s);
+    const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+    const loginCard = $("#loginCard");
+    const panelCard = $("#panelCard");
+    const listCard  = $("#listCard");
+    const loginForm = $("#loginForm");
+    const loginError = $("#loginError");
+    const logoutBtn = $("#logoutBtn");
+    const createForm = $("#createForm");
+    const imgPreviewWrap = $("#imgPreviewWrap");
+    const listingsWrap = $("#listingsWrap");
+    const countBadge = $("#countBadge");
+    const imageInput = $("#imageInput");
+    const filesCounter = $("#filesCounter");
+
+    // --- stan akumulujący wybrane pliki (wiele tur) ---
+    const MAX_FILES = 20;
+    let selectedFiles = []; // Array<File>
+
+    function filesAreSame(a, b) {
+      return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified && a.type === b.type;
+    }
+
+    function updateFileInputState() {
+      // jeśli mamy coś w selectedFiles, wyłączamy 'required', żeby walidator nie blokował submitu
+      imageInput.required = selectedFiles.length === 0;
+      if (filesCounter) {
+        filesCounter.textContent = selectedFiles.length ? `Wybrano: ${selectedFiles.length}` : "";
+      }
+    }
+
+    function syncInputFilesFromSelected() {
+      // Uwaga: DataTransfer działa we współczesnych przeglądarkach
+      const dt = new DataTransfer();
+      selectedFiles.forEach(f => dt.items.add(f));
+      imageInput.files = dt.files;
+      updateFileInputState();
+    }
+
+    function renderPreviews() {
+      imgPreviewWrap.innerHTML = "";
+      if (!selectedFiles.length) { updateFileInputState(); return; }
+      selectedFiles.forEach((file, idx) => {
+        const url = URL.createObjectURL(file);
+        const wrap = document.createElement("div");
+        wrap.className = "thumb";
+        wrap.innerHTML = `
+          <img src="${url}" class="h-24 w-32 object-cover rounded-lg border" alt="">
+          <button type="button" class="btn btn-outline rounded-lg text-xs" aria-label="Usuń">✕</button>
+        `;
+        wrap.querySelector("button").addEventListener("click", () => {
+          selectedFiles.splice(idx, 1);
+          syncInputFilesFromSelected();
+          renderPreviews();
+        });
+        imgPreviewWrap.appendChild(wrap);
+        wrap.querySelector("img").addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
+      });
+      updateFileInputState();
+    }
+
+    imageInput.addEventListener("change", (e) => {
+      const incoming = Array.from(e.target.files || []);
+      let merged = [...selectedFiles];
+
+      for (const f of incoming) {
+        const exists = merged.some(x => filesAreSame(x, f));
+        if (!exists) merged.push(f);
+      }
+
+      if (merged.length > MAX_FILES) {
+        alert(`Możesz dodać maksymalnie ${MAX_FILES} zdjęć. Nadmiar zostanie pominięty.`);
+        merged = merged.slice(0, MAX_FILES);
+      }
+
+      selectedFiles = merged;
+      syncInputFilesFromSelected();
+      renderPreviews();
+
+      // wyczyść wartość, aby można było ponownie wybrać te same pliki
+      imageInput.value = "";
+    });
+
+    async function api(path, opts={}) {
+      const res = await fetch(path, { credentials: "same-origin", ...opts });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || "Błąd");
+      return data;
+    }
+
+    async function refreshAuth() {
+      const me = await api("/api/me");
+      const isAdmin = !!me.admin;
+      if (isAdmin) {
+        loginCard.classList.add("hidden");
+        panelCard.classList.remove("hidden");
+        listCard.classList.remove("hidden");
+        logoutBtn.classList.remove("hidden");
+        await refreshList();
+      } else {
+        loginCard.classList.remove("hidden");
+        panelCard.classList.add("hidden");
+        listCard.classList.add("hidden");
+        logoutBtn.classList.add("hidden");
+      }
+    }
+
+    async function refreshList() {
+      const data = await api("/api/listings");
+      countBadge.textContent = data.length;
+      listingsWrap.innerHTML = "";
+      if (!data.length) {
+        listingsWrap.innerHTML = '<div class="text-zinc-600">Brak ofert.</div>';
+        return;
+      }
+      for (const x of data) {
+        const cover = (Array.isArray(x.images) && x.images.length ? x.images[0] : x.image) || "";
+        const card = document.createElement("div");
+        card.className = "border rounded-2xl overflow-hidden bg-white";
+        card.innerHTML = `
+          <div class="flex gap-3 p-3">
+            <img src="${cover}" class="h-24 w-32 object-cover rounded-lg" alt="">
+            <div class="flex-1">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="font-semibold">${x.title}</div>
+                  <div class="text-xs text-zinc-600">${x.city} • ${x.type} • ${x.area} m² • ${x.rooms} pokoje${x.floor!==null&&x.floor!==undefined?` • piętro ${x.floor}`:""}</div>
+                </div>
+                <div class="font-semibold">${new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN",maximumFractionDigits:0}).format(x.price)}</div>
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                ${x.terrace ? '<span class="pill">Taras</span>' : ""}
+                ${x.garden ? '<span class="pill">Ogród</span>' : ""}
+                <button data-id="${x.id}" class="btn btn-outline rounded-lg ml-auto deleteBtn">Usuń</button>
+              </div>
+            </div>
+          </div>
+        `;
+        listingsWrap.appendChild(card);
+      }
+      $$(".deleteBtn", listingsWrap).forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("Usunąć tę ofertę?")) return;
+          try {
+            await api(`/api/listings/${btn.dataset.id}`, { method: "DELETE" });
+            await refreshList();
+          } catch (e) { alert(e.message); }
+        });
+      });
+    }
+
+    // logowanie
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.classList.add("hidden");
+      try {
+        const r = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ password: $("#password").value.trim() })
+        });
+        if (!r.ok) throw new Error("Nieprawidłowe hasło");
+        await refreshAuth();
+      } catch (err) {
+        loginError.textContent = err.message || "Nieprawidłowe hasło";
+        loginError.classList.remove("hidden");
+      }
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      await api("/api/logout", { method: "POST" });
+      await refreshAuth();
+    });
+
+    // dodawanie oferty
+    createForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      // Wymuś co najmniej 1 zdjęcie
+      if (!selectedFiles.length) {
+        alert("Dodaj przynajmniej jedno zdjęcie.");
+        return;
+      }
+
+      const fd = new FormData(createForm);
+
+      // usuń ewentualne puste wpisy images[]/images z inputa — dodamy własne
+      fd.delete("images[]");
+      fd.delete("images");
+
+      // dołóż wszystkie wybrane pliki (akumulowane)
+      selectedFiles.forEach(file => fd.append("images[]", file, file.name));
+
+      try {
+        const r = await fetch("/api/listings", { method: "POST", body: fd, credentials: "same-origin" });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          throw new Error(j.error || "Błąd dodawania");
+        }
+        createForm.reset();
+        selectedFiles = [];
+        syncInputFilesFromSelected();
+        renderPreviews();
+        await refreshList();
+        alert("Oferta dodana ✅");
+      } catch (err) {
+        alert(err.message || "Błąd dodawania");
+      }
+    });
+
+    // start
+    updateFileInputState();
+    refreshAuth().catch(console.error);
+  </script>
+</body>
+</html>
