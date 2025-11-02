@@ -1,4 +1,4 @@
-// server.js — wersja finalna bez logowania, z /panel33201
+// server.js — wersja finalna bez logowania, z /panel33201 (fix relative assets + redirects)
 const express = require("express");
 const path = require("path");
 const cookieParser = require("cookie-parser");
@@ -34,9 +34,14 @@ app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // ====== STATYCZNE PLIKI ======
+// Statyki spod root'a (np. /index.html, /oferty.html, /app.js, /styles.css)
 app.use(express.static(__dirname));
 
-// ====== INICJALIZACJA TABEL ======
+// Dodatkowo: serwuj statyki POD prefiksem /panel33201, żeby relative pathy działały
+// (np. <script src="app.js"> załaduje się jako /panel33201/app.js).
+app.use("/panel33201", express.static(__dirname));
+
+// ====== INICjALIZACJA TABEL ======
 async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS listings (
@@ -101,13 +106,16 @@ app.get("/api/listings", async (_req, res) => {
 // Jedno ogłoszenie
 app.get("/api/listings/:id", async (req, res) => {
   const { id } = req.params;
-  const { rows } = await pool.query(`
+  const { rows } = await pool.query(
+    `
     SELECT l.*, COALESCE(json_agg(i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS image_ids
     FROM listings l
     LEFT JOIN images i ON i.listing_id = l.id
     WHERE l.id=$1
     GROUP BY l.id;
-  `, [id]);
+  `,
+    [id]
+  );
   if (rows.length === 0) return res.status(404).json({ error: "Nie znaleziono" });
   res.json(rows[0]);
 });
@@ -121,17 +129,20 @@ app.post("/api/listings", upload.array("images", 12), async (req, res) => {
       terrace, garden, description
     } = req.body;
 
-    const { rows } = await pool.query(`
+    const { rows } = await pool.query(
+      `
       INSERT INTO listings (title, city, district, street, price, rooms, area, type, floor, balcony, terrace, garden, description)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       RETURNING *;
-    `, [
-      title, city, district || null, street || null,
-      Number(price), Number(rooms), Number(area),
-      type, floor ? Number(floor) : null,
-      balcony === "true", terrace === "true", garden === "true",
-      description || null
-    ]);
+    `,
+      [
+        title, city, district || null, street || null,
+        Number(price), Number(rooms), Number(area),
+        type, floor ? Number(floor) : null,
+        balcony === "true", terrace === "true", garden === "true",
+        description || null,
+      ]
+    );
 
     const listing = rows[0];
 
@@ -161,24 +172,32 @@ app.put("/api/listings/:id", upload.array("images", 12), async (req, res) => {
   } = req.body;
 
   try {
-    await pool.query(`
+    await pool.query(
+      `
       UPDATE listings SET
       title=$1, city=$2, district=$3, street=$4, price=$5, rooms=$6,
       area=$7, type=$8, floor=$9, balcony=$10, terrace=$11, garden=$12, description=$13
       WHERE id=$14;
-    `, [
-      title, city, district || null, street || null,
-      Number(price), Number(rooms), Number(area),
-      type, floor ? Number(floor) : null,
-      balcony === "true", terrace === "true", garden === "true",
-      description || null, id
-    ]);
+    `,
+      [
+        title, city, district || null, street || null,
+        Number(price), Number(rooms), Number(area),
+        type, floor ? Number(floor) : null,
+        balcony === "true", terrace === "true", garden === "true",
+        description || null, id,
+      ]
+    );
 
     if (remove_images) {
       let arr = [];
-      try { arr = JSON.parse(remove_images); } catch {}
+      try {
+        arr = JSON.parse(remove_images);
+      } catch {}
       if (Array.isArray(arr) && arr.length) {
-        await pool.query("DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])", [id, arr]);
+        await pool.query(
+          "DELETE FROM images WHERE listing_id=$1 AND id = ANY($2::int[])",
+          [id, arr]
+        );
       }
     }
 
@@ -207,24 +226,34 @@ app.delete("/api/listings/:id", async (req, res) => {
 
 // ====== ROUTING STRON ======
 
+// Helper: no-cache dla HTML (zapobiega białym ekranom po deployu przez cache)
+function noCacheHtml(res) {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+}
+
 // Strona główna
 app.get("/", (_req, res) => {
+  noCacheHtml(res);
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
 // Zwykłe oferty
 app.get("/oferty.html", (_req, res) => {
+  noCacheHtml(res);
   res.sendFile(path.join(__dirname, "oferty.html"));
 });
 
-// Panel administracyjny — tylko po tajnym URL
-app.get("/panel33201", (_req, res) => {
+// Panel administracyjny — renderuj panel dla /panel33201 i dowolnych pod-ścieżek
+app.get(["/panel33201", "/panel33201/*"], (_req, res) => {
+  noCacheHtml(res);
   res.sendFile(path.join(__dirname, "oferty.html"));
 });
 
-// Opcjonalne przekierowanie starego adresu /panel
+// Przekierowanie starego adresu /panel → /panel33201 (301)
 app.get("/panel", (_req, res) => {
-  res.redirect("/");
+  res.redirect(301, "/panel33201");
 });
 
 // Healthcheck (dla Railway)
