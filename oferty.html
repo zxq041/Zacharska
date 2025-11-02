@@ -1,378 +1,509 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Wszystkie oferty - Centrum nieruchomości</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    body { font-family: 'Inter', sans-serif; }
-    .scrollbar-none::-webkit-scrollbar { display:none; } .scrollbar-none{ -ms-overflow-style:none; scrollbar-width:none; }
-    @keyframes fadeIn { from{opacity:0} to{opacity:1} } .animate-fade-in{ animation: fadeIn .25s ease-out; }
-  </style>
-</head>
-<body class="bg-gradient-to-b from-blue-50 via-white to-blue-50 text-zinc-900">
-  <div id="root"></div>
-
-  <script type="text/babel">
-  const {useEffect, useMemo, useRef, useState} = React;
-
-  const API = {
-    LIST: "/api/listings",
-    IMAGE: (id)=> `/api/images/${id}`,
-  };
-
-  // ---------- UI helpers ----------
-  const cn = (...a)=>a.filter(Boolean).join(' ');
-  const currency = (n)=> new Intl.NumberFormat("pl-PL",{style:"currency",currency:"PLN", maximumFractionDigits:0}).format(n);
-
-  const Button = ({variant='default', size='default', className, ...props})=>{
-    const variants = {
-      default: "bg-blue-600 text-white hover:bg-blue-700",
-      outline: "border border-zinc-200 bg-white hover:bg-blue-50",
-      ghost: "hover:bg-blue-50",
-      danger:"bg-red-500 text-white hover:bg-red-600"
-    };
-    const sizes = { default:"h-10 px-4 py-2", sm:"h-9 px-3", lg:"h-11 px-6", icon:"h-10 w-10 p-0"};
-    return <button className={cn("rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed", variants[variant], sizes[size], className)} {...props} />;
-  };
-  const Card = ({className, ...p}) => <div className={cn("rounded-2xl border bg-white/80 backdrop-blur shadow-sm", className)} {...p}/>;
-  const Input = (p)=> <input className={cn("w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500", p.className)} {...p} />;
-  const Textarea = (p)=> <textarea className={cn("w-full min-h-[90px] rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500", p.className)} {...p} />;
-  const Badge = ({children, className}) => <span className={cn("inline-flex items-center rounded-full bg-blue-100 text-blue-900 px-2.5 py-0.5 text-xs font-semibold",className)}>{children}</span>;
-
-  const Icon = ({name, className})=>{
-    const paths = {
-      Heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>,
-      MapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></>,
-      X: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
-      ChevronLeft: <path d="m15 18-6-6 6-6"/>,
-      ChevronRight: <path d="m9 18 6-6-6-6"/>,
-      Trash: <><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></>
-    };
-    return <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{paths[name]}</svg>;
-  };
-
-  // ---------- Header ----------
-  const Header = ({isPanel})=>{
-    return (
-      <header className="sticky top-0 z-40 bg-white/70 backdrop-blur border-b">
-        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
-          <a href="/index.html" className="flex items-center gap-3">
-            <img src="https://i.imgur.com/UwnwhuV.png" alt="logo" className="h-10 w-10"/>
-            <div>
-              <div className="font-semibold tracking-tight">Centrum nieruchomości</div>
-              <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
-            </div>
-          </a>
-          <nav className="flex items-center gap-3 text-sm">
-            {!isPanel && <a href="/oferty.html" className="text-zinc-700">Oferty</a>}
-            {isPanel ? <Badge className="bg-emerald-100 text-emerald-800">Panel administratora</Badge> : <a className="text-zinc-700 hover:text-blue-600" href="/panel33201">Panel</a>}
-          </nav>
-        </div>
-      </header>
-    );
-  };
-
-  // ---------- Admin Panel ----------
-  function AdminPanel(){
-    const empty = {id:null,title:"",city:"",district:"",street:"",type:"Mieszkanie",floor:"",area:"",rooms:"",price:"",balcony:false,terrace:false,garden:false,description:""};
-    const [form,setForm] = useState(empty);
-    const [files,setFiles] = useState([]);
-    const [list,setList] = useState([]);
-    const [loading,setLoading] = useState(true);
-    const [saving,setSaving] = useState(false);
-    const [toRemove,setToRemove] = useState([]); // image ids to delete on PUT
-
-    const load = ()=>{
-      setLoading(true);
-      fetch(API.LIST).then(r=>r.json()).then(setList).finally(()=>setLoading(false));
-    };
-    useEffect(load,[]);
-
-    const onPickFiles = (e)=> setFiles(Array.from(e.target.files || []));
-
-    const startEdit = (row)=>{
-      setForm({
-        id: row.id, title:row.title, city:row.city, district:row.district||"",
-        street:row.street||"", type:row.type, floor:row.floor??"",
-        area:row.area, rooms:row.rooms, price:row.price,
-        balcony: !!row.balcony, terrace: !!row.terrace, garden: !!row.garden,
-        description: row.description||""
-      });
-      setToRemove([]);
-      setFiles([]);
-      window.scrollTo({top:0,behavior:'smooth'});
-    };
-
-    const reset = ()=>{ setForm(empty); setFiles([]); setToRemove([]); };
-
-    const submit = async (e)=>{
-      e.preventDefault();
-      setSaving(true);
-      try{
-        const fd = new FormData();
-        Object.entries(form).forEach(([k,v])=>{
-          if (k==="id") return;
-          fd.append(k, typeof v==="boolean" ? String(v) : v);
-        });
-        files.forEach(f=> fd.append("images", f));
-        if (form.id){ // PUT
-          if (toRemove.length) fd.append("remove_images", JSON.stringify(toRemove));
-          const r = await fetch(`${API.LIST}/${form.id}`, { method:"PUT", body: fd });
-          if (!r.ok) throw new Error("PUT fail");
-        } else {       // POST
-          const r = await fetch(API.LIST, { method:"POST", body: fd });
-          if (!r.ok) throw new Error("POST fail");
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wszystkie oferty - Centrum nieruchomości</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="icon" type="image" href="/favicon.png">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
         }
-        reset();
-        load();
-      }catch(err){ alert("Błąd zapisu"); console.error(err); }
-      finally{ setSaving(false); }
-    };
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-    const del = async (id)=>{
-      if(!confirm("Usunąć ogłoszenie?")) return;
-      await fetch(`${API.LIST}/${id}`,{method:"DELETE"});
-      if (form.id===id) reset();
-      load();
-    };
+ <script type="text/babel">
+const { useEffect, useMemo, useRef, useState } = React;
 
-    const toggleRemoveImg = (imgId)=>{
-      setToRemove(prev => prev.includes(imgId) ? prev.filter(x=>x!==imgId) : [...prev, imgId]);
-    };
+// ---------- CONFIG ----------
+const API_URL = "/api/listings";
 
-    return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <h1 className="text-2xl font-semibold mb-4">Dodaj / Edytuj ogłoszenie</h1>
+// ---------- UTILITIES ----------
+const cn = (...classes) => classes.filter(Boolean).join(' ');
+const clamp = (n, min, max) => Math.max(min, Math.min(n, max));
+const currency = (n) => new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 }).format(n);
+const useLocalStorage = (key, initial) => {
+  const [state, setState] = useState(() => {
+    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : initial } catch { return initial }
+  });
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(state)) } catch {} }, [key, state]);
+  return [state, setState];
+};
 
-        <Card className="p-4">
-          <form onSubmit={submit} className="grid md:grid-cols-2 gap-4">
-            <Input placeholder="Tytuł" value={form.title} onChange={e=>setForm({...form,title:e.target.value})} required/>
-            <Input placeholder="Miasto" value={form.city} onChange={e=>setForm({...form,city:e.target.value})} required/>
-            <Input placeholder="Dzielnica" value={form.district} onChange={e=>setForm({...form,district:e.target.value})}/>
-            <Input placeholder="Ulica" value={form.street} onChange={e=>setForm({...form,street:e.target.value})}/>
-            <select className="rounded-md border border-zinc-300 px-3 py-2 text-sm" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
-              <option>Mieszkanie</option><option>Dom</option><option>Apartament</option><option>Loft</option>
-            </select>
-            <Input type="number" placeholder="Piętro" value={form.floor} onChange={e=>setForm({...form,floor:e.target.value})}/>
-            <Input type="number" placeholder="Metraż (m²)" value={form.area} onChange={e=>setForm({...form,area:e.target.value})} required/>
-            <Input type="number" placeholder="Pokoje" value={form.rooms} onChange={e=>setForm({...form,rooms:e.target.value})} required/>
-            <Input type="number" placeholder="Cena (PLN)" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} required/>
+// ---------- ICONS ----------
+const Icon = ({ name, className }) => {
+  const icons = {
+    MapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
+    Phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />,
+    Mail: <><rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></>,
+    Menu: <><line x1="4" x2="20" y1="12" y2="12" /><line x1="4" x2="20" y1="6" y2="6" /><line x1="4" x2="20" y1="18" y2="18" /></>,
+    Heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
+    ChevronLeft: <path d="m15 18-6-6 6-6" />,
+    X: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
+    Languages: <><path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" /></>,
+    LogIn: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" x2="3" y1="12" y2="12" /></>,
+    LogOut: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></>,
+    UserPlus: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" x2="19" y1="8" y2="14" /><line x1="22" x2="16" y1="11" y2="11" /></>,
+    Loader2: <path d="M21 12a9 9 0 1 1-6.219-8.56" />,
+  };
+  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("h-4 w-4", className)}>{icons[name]}</svg>;
+};
 
-            <div className="flex items-center gap-4 col-span-2">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.balcony} onChange={e=>setForm({...form,balcony:e.target.checked})}/> Balkon</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.terrace} onChange={e=>setForm({...form,terrace:e.target.checked})}/> Taras</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.garden} onChange={e=>setForm({...form,garden:e.target.checked})}/> Ogród</label>
-            </div>
+// ---------- UI COMPONENTS ----------
+const Button = ({ variant = 'default', size = 'default', className, children, ...props }) => {
+  const variants = { 
+    default: "bg-blue-600 text-white hover:bg-blue-700",
+    destructive: "bg-red-500 text-white hover:bg-red-600", 
+    outline: "border border-zinc-200 bg-transparent hover:bg-blue-50",
+    secondary: "bg-blue-100 text-blue-800 hover:bg-blue-200",
+    ghost: "hover:bg-blue-100",
+    link: "text-blue-600 underline-offset-4 hover:underline",
+  };
+  const sizes = { default: "h-10 px-4 py-2", sm: "h-9 rounded-md px-3", lg: "h-11 rounded-md px-8", icon: "h-10 w-10", };
+  return <button className={cn("inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none", variants[variant], sizes[size], className)} {...props}>{children}</button>;
+};
+const Card = ({ className, children }) => <div className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}>{children}</div>;
+const CardHeader = ({ className, children }) => <div className={cn("flex flex-col space-y-1.5 p-6", className)}>{children}</div>;
+const CardTitle = ({ className, children }) => <h3 className={cn("text-2xl font-semibold leading-none tracking-tight", className)}>{children}</h3>;
+const CardContent = ({ className, children }) => <div className={cn("p-6 pt-0", className)}>{children}</div>;
+const Input = ({ className, ...props }) => <input className={cn("flex h-10 w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50", className)} {...props} />;
+const Switch = () => <button type="button" role="switch" className="peer inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent bg-zinc-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-blue-600"><span className="pointer-events-none block h-5 w-5 rounded-full bg-white shadow-lg ring-0 transition-transform data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0" /></button>;
+const Badge = ({ variant = 'default', className, children }) => {
+  const variants = { default: "border-transparent bg-blue-600 text-blue-50", secondary: "border-transparent bg-blue-100 text-blue-900" };
+  return <div className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors", variants[variant], className)}>{children}</div>;
+};
+const Slider = ({ className, min = 0, max = 100, step = 1, defaultValue = [0, 100], onValueChange }) => {
+  const [values, setValues] = useState(defaultValue);
+  const rangeRef = useRef(null);
+  useEffect(() => { setValues(defaultValue); }, [defaultValue]);
+  const handleMouseMove = (e, thumbIndex) => {
+    if (!rangeRef.current) return;
+    const rect = rangeRef.current.getBoundingClientRect();
+    const percent = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    const newValue = Math.round((min + percent * (max - min)) / step) * step;
+    let newValues = [...values];
+    if (thumbIndex === 0) {
+      newValues[0] = Math.min(newValue, values[1] - step);
+    } else {
+      newValues[1] = Math.max(newValue, values[0] + step);
+    }
+    setValues(newValues);
+    if (onValueChange) onValueChange(newValues);
+  };
+  const handleMouseDown = (thumbIndex) => (e) => {
+    const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+    const onMove = (moveE) => handleMouseMove(moveE, thumbIndex);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+  const leftPercent = ((values[0] - min) / (max - min)) * 100;
+  const rightPercent = ((values[1] - min) / (max - min)) * 100;
+  return (
+    <div ref={rangeRef} className={cn("relative flex items-center select-none touch-none w-full h-5 cursor-pointer", className)}>
+      <div className="relative w-full h-1 bg-zinc-200 rounded-full">
+        <div className="absolute h-full bg-blue-600 rounded-full" style={{ left: `${leftPercent}%`, right: `${100 - rightPercent}%` }} />
+        <div onMouseDown={handleMouseDown(0)} className="absolute w-4 h-4 bg-white border-2 border-blue-600 rounded-full -top-1.5 transform -translate-x-1/2" style={{ left: `${leftPercent}%` }} />
+        <div onMouseDown={handleMouseDown(1)} className="absolute w-4 h-4 bg-white border-2 border-blue-600 rounded-full -top-1.5 transform -translate-x-1/2" style={{ left: `${rightPercent}%` }} />
+      </div>
+    </div>
+  );
+};
+const Dialog = ({ open, onOpenChange, children }) => {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)}>
+      <div onClick={(e) => e.stopPropagation()} className="fixed left-1/2 top-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 border bg-white p-6 shadow-lg rounded-lg">
+        {children}
+      </div>
+    </div>
+  );
+};
+const DialogContent = ({ children, className }) => <div className={className}>{children}</div>;
+const DialogHeader = ({ children }) => <div className="flex flex-col space-y-1.5 text-center sm:text-left">{children}</div>;
+const DialogTitle = ({ children }) => <h2 className="text-lg font-semibold">{children}</h2>;
+const Sheet = ({ open, onOpenChange, children }) => {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)}>
+      <div onClick={(e) => e.stopPropagation()} className="fixed inset-y-0 right-0 z-50 w-full max-w-sm border-l bg-white p-6 shadow-lg">
+        {children}
+      </div>
+    </div>
+  );
+};
+const SheetContent = ({ children }) => <div>{children}</div>;
+const SheetHeader = ({ children }) => <div className="flex flex-col space-y-2 text-center sm:text-left">{children}</div>;
+const SheetTitle = ({ children }) => <h2 className="text-lg font-semibold text-foreground">{children}</h2>;
+const Skeleton = ({ className }) => <div className={cn("animate-pulse rounded-md bg-zinc-200", className)} />;
 
-            <Textarea className="md:col-span-2" placeholder="Opis" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/>
+// ---------- I18N ----------
+const dict = {
+  pl: { nav: ["Oferty", "O nas", "Opinie", "Kontakt"], allOffers: "Wszystkie Oferty", filters: { location: "Lokalizacja", price: "Cena", area: "Metraż", rooms: "Pokoje", type: "Typ", newest: "Najnowsze", cheapest: "Najtańsze", featured: "Polecane", grid: "Siatka", list: "Lista", fav: "Ulubione", clear: "Wyczyść" }, login: { login: "Zaloguj", register: "Rejestracja" } },
+  en: { nav: ["Listings", "About", "Reviews", "Contact"], allOffers: "All Listings", filters: { location: "Location", price: "Price", area: "Area", rooms: "Rooms", type: "Type", newest: "Newest", cheapest: "Cheapest", featured: "Featured", grid: "Grid", list: "List", fav: "Favourites", clear: "Clear" }, login: { login: "Login", register: "Register" } }
+};
 
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium mb-1">Zdjęcia (możesz wybrać wiele)</label>
-              <label className="inline-block cursor-pointer rounded-md border px-4 py-2 text-sm bg-white hover:bg-blue-50">
-                Wybierz pliki
-                <input type="file" className="hidden" multiple accept="image/*" onChange={onPickFiles}/>
-              </label>
-              {files.length>0 && <div className="text-xs text-zinc-500 mt-1">{files.length} plik(i) wybrane</div>}
-            </div>
+// ---------- ROOT APP ----------
+function App() {
+  const [lang, setLang] = useState("pl");
+  const t = dict[lang];
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [authed, setAuthed] = useLocalStorage("auth", { logged: false, name: "" });
+  const [favs, setFavs] = useLocalStorage("favs", []);
 
-            {form.id && (
-              <div className="md:col-span-2">
-                <div className="text-sm font-medium mb-1">Zdjęcia już w ogłoszeniu (zaznacz, aby usunąć):</div>
-                <div className="flex flex-wrap gap-3">
-                  {(list.find(x=>x.id===form.id)?.image_ids || []).map(imgId=>(
-                    <label key={imgId} className={cn("relative block", toRemove.includes(imgId) && "opacity-60")}>
-                      <img src={API.IMAGE(imgId)} className="h-24 w-32 object-cover rounded-md border" />
-                      <input type="checkbox" className="absolute top-1 left-1 h-4 w-4" checked={toRemove.includes(imgId)} onChange={()=>toggleRemoveImg(imgId)}/>
-                    </label>
-                  ))}
-                  {(!list.find(x=>x.id===form.id)?.image_ids?.length) && <div className="text-sm text-zinc-500">Brak zdjęć.</div>}
-                </div>
-              </div>
-            )}
+  const toggleFav = (id) => setFavs((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const goBack = () => { window.location.href = 'index.html'; };
 
-            <div className="md:col-span-2 flex gap-2">
-              <Button type="submit" disabled={saving}>{form.id ? "Zapisz zmiany" : "Dodaj ogłoszenie"}</Button>
-              {form.id && <Button type="button" variant="outline" onClick={reset}>Anuluj edycję</Button>}
-            </div>
-          </form>
-        </Card>
-
-        <h2 className="text-xl font-semibold mt-8 mb-3">Twoje ogłoszenia</h2>
-        {loading ? <div>Ładowanie…</div> : (
-          <div className="grid md:grid-cols-3 gap-4">
-            {list.map(it=>(
-              <Card key={it.id} className="overflow-hidden">
-                <div className="h-40 bg-zinc-100">
-                  {it.image_ids?.length ? <img src={API.IMAGE(it.image_ids[0])} className="h-full w-full object-cover"/> : <div className="h-full w-full flex items-center justify-center text-zinc-400">Brak zdjęcia</div>}
-                </div>
-                <div className="p-4 space-y-2">
-                  <div className="font-semibold">{it.title}</div>
-                  <div className="text-sm text-zinc-600">{it.city}{it.district ? " • "+it.district : ""} • {it.area} m² • {it.rooms} pokoje</div>
-                  <div className="font-semibold">{currency(it.price)}</div>
-                  <div className="flex gap-2 pt-2">
-                    <Button variant="outline" onClick={()=>startEdit(it)}>Edytuj</Button>
-                    <Button variant="danger" onClick={()=>del(it.id)}><Icon name="Trash" className="inline -mt-0.5 mr-1"/>Usuń</Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 via-white to-blue-50 text-zinc-900 selection:bg-blue-200 selection:text-blue-900">
+      <Header t={t} lang={lang} setLang={setLang} authed={authed} setAuthed={setAuthed} menuOpen={menuOpen} setMenuOpen={setMenuOpen} />
+      <main>
+        <AllOffers t={t} favs={favs} toggleFav={toggleFav} onBack={goBack} />
       </main>
-    );
-  }
+      <Footer />
+    </div>
+  );
+}
 
-  // ---------- Public list ----------
-  function PublicList(){
-    const [list,setList] = useState([]);
-    const [q,setQ] = useState("");
-    const [city,setCity] = useState("");
-    const [type,setType] = useState("");
-    const [selected,setSelected] = useState(null);
-
-    useEffect(()=>{
-      fetch(API.LIST).then(r=>r.json()).then(setList);
-    },[]);
-
-    const filtered = useMemo(()=>{
-      return list.filter(x =>
-        x.title.toLowerCase().includes(q.toLowerCase()) &&
-        (!city || x.city===city) &&
-        (!type || x.type===type)
-      );
-    },[list,q,city,type]);
-
-    return (
-      <main className="mx-auto max-w-7xl px-4 py-8">
-        <div className="flex items-center gap-3">
-          <a href="/index.html" className="inline-flex items-center gap-2 text-sm text-zinc-700 hover:text-blue-600">
-            <Icon name="ChevronLeft"/> Wróć
-          </a>
-          <h1 className="text-2xl font-semibold">Wszystkie Oferty</h1>
-          <Badge className="ml-2">{filtered.length}</Badge>
-        </div>
-
-        <div className="mt-4 grid md:grid-cols-12 gap-3 p-4 bg-white/70 backdrop-blur rounded-2xl border">
-          <div className="md:col-span-5"><Input placeholder="Szukaj tytułu…" value={q} onChange={e=>setQ(e.target.value)}/></div>
-          <div className="md:col-span-3">
-            <select className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" value={city} onChange={e=>setCity(e.target.value)}>
-              <option value="">Miasto</option>
-              {[...new Set(list.map(x=>x.city))].map(c=><option key={c}>{c}</option>)}
-            </select>
+// ---------- HEADER ----------
+function Header({ lang, setLang, t, authed, setAuthed, menuOpen, setMenuOpen }) {
+  return (
+    <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/60 border-b border-zinc-200/70">
+      <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+        <a href="index.html" className="flex items-center gap-3">
+          <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-12 w-12" />
+          <div>
+            <div className="font-semibold tracking-tight">Centrum nieruchomości</div>
+            <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
           </div>
-          <div className="md:col-span-3">
-            <select className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm" value={type} onChange={e=>setType(e.target.value)}>
-              <option value="">Typ</option>
-              {[...new Set(list.map(x=>x.type))].map(t=><option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="md:col-span-1 flex items-center justify-end">
-            <a href="/panel33201" className="text-xs text-zinc-500 hover:text-blue-600">/panel</a>
-          </div>
-        </div>
-
-        <div className="mt-6 grid md:grid-cols-3 gap-4">
-          {filtered.map(item=>(
-            <div key={item.id} className="group cursor-pointer" onClick={()=>setSelected(item)}>
-              <Card className="overflow-hidden shadow-[0_20px_60px_-25px_rgba(0,0,0,.15)] transition-transform group-hover:-translate-y-1">
-                <div className="h-56 bg-zinc-100">
-                  {item.image_ids?.length ? <img src={API.IMAGE(item.image_ids[0])} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"/> : <div className="h-full w-full flex items-center justify-center text-zinc-400">Brak zdjęcia</div>}
-                </div>
-                <div className="p-4">
-                  <div className="text-lg font-semibold">{item.title}</div>
-                  <div className="text-sm text-zinc-600 flex items-center gap-2">
-                    <Icon name="MapPin"/> {item.city}{item.district ? " • "+item.district : ""} • {item.area} m² • {item.rooms} pokoje
-                  </div>
-                  <div className="mt-2 text-xl font-semibold">{currency(item.price)}</div>
-                </div>
-              </Card>
-            </div>
-          ))}
-        </div>
-
-        {selected && <OfferModal data={selected} onClose={()=>setSelected(null)} />}
-      </main>
-    );
-  }
-
-  // ---------- Offer details modal (gallery) ----------
-  function OfferModal({data,onClose}){
-    const [idx,setIdx] = useState(0);
-    const imgs = data.image_ids || [];
-    useEffect(()=>{ document.body.style.overflow='hidden'; return ()=>{document.body.style.overflow='unset'}; },[]);
-    const prev = ()=> setIdx(i => (i-1+imgs.length)%imgs.length);
-    const next = ()=> setIdx(i => (i+1)%imgs.length);
-
-    return (
-      <div className="fixed inset-0 bg-black/70 z-50 animate-fade-in" onClick={onClose}>
-        <div className="absolute inset-6 md:inset-12 bg-white rounded-2xl overflow-hidden" onClick={e=>e.stopPropagation()}>
-          <button className="absolute top-3 right-3 rounded-full bg-white/90 p-2 hover:bg-white" onClick={onClose}><Icon name="X"/></button>
-          <div className="grid md:grid-cols-2 h-full">
-            <div className="relative bg-zinc-100">
-              {imgs.length ? <img src={API.IMAGE(imgs[idx])} className="h-full w-full object-cover"/> : <div className="h-full w-full flex items-center justify-center text-zinc-400">Brak zdjęć</div>}
-              {imgs.length>1 && (
-                <>
-                  <button className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 rounded-full p-2" onClick={prev}><Icon name="ChevronLeft"/></button>
-                  <button className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 rounded-full p-2" onClick={next}><Icon name="ChevronRight"/></button>
-                  <div className="absolute bottom-2 left-0 right-0 flex gap-2 justify-center px-3">
-                    {imgs.map((id,i)=>(
-                      <img key={id} src={API.IMAGE(id)} onClick={()=>setIdx(i)} className={cn("h-14 w-20 object-cover rounded-md border cursor-pointer", i===idx ? "ring-2 ring-blue-500" : "opacity-80")} />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="p-6 overflow-y-auto">
-              <Badge>{data.type}</Badge>
-              <h2 className="text-2xl font-bold mt-2">{data.title}</h2>
-              <div className="text-zinc-600 mt-1 flex items-center gap-2"><Icon name="MapPin"/>{data.city}{data.district ? " • "+data.district : ""}{data.street ? " • "+data.street : ""}</div>
-              <div className="text-3xl font-bold my-6">{currency(data.price)}</div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="text-zinc-500">Metraż:</div><div className="font-medium">{data.area} m²</div>
-                <div className="text-zinc-500">Pokoje:</div><div className="font-medium">{data.rooms}</div>
-                <div className="text-zinc-500">Piętro:</div><div className="font-medium">{data.floor ?? "-"}</div>
-                <div className="text-zinc-500">Balkon:</div><div className="font-medium">{data.balcony ? "Tak" : "Nie"}</div>
-                <div className="text-zinc-500">Taras:</div><div className="font-medium">{data.terrace ? "Tak" : "Nie"}</div>
-                <div className="text-zinc-500">Ogród:</div><div className="font-medium">{data.garden ? "Tak" : "Nie"}</div>
+        </a>
+        <nav className="hidden md:flex items-center gap-6 text-sm">
+          <a href="index.html#offers" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[0]}</a>
+          <a href="index.html#about" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[1]}</a>
+          <a href="index.html#testimonials" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[2]}</a>
+          <a href="index.html#contact" className="relative py-1.5 after:content-[''] after:absolute after:left-0 after:bottom-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-250 hover:after:w-full">{t.nav[3]}</a>
+          <Button variant="secondary" className="shadow-sm">{t.allOffers}</Button>
+          <LangToggle lang={lang} setLang={setLang} />
+          <AuthControls authed={authed} setAuthed={setAuthed} />
+        </nav>
+        <div className="md:hidden flex items-center gap-2">
+          <LangToggle lang={lang} setLang={setLang} />
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+            <Button variant="outline" size="icon" className="rounded-xl" onClick={() => setMenuOpen(true)}>
+              <Icon name="Menu" className="h-5 w-5" />
+            </Button>
+            <SheetContent>
+              <SheetHeader><SheetTitle>Menu</SheetTitle></SheetHeader>
+              <div className="mt-4 flex flex-col gap-3">
+                <a href="index.html#offers" onClick={() => setMenuOpen(false)} className="py-2 text-lg">{t.nav[0]}</a>
+                <a href="index.html#about" onClick={() => setMenuOpen(false)} className="py-2 text-lg">{t.nav[1]}</a>
+                <a href="index.html#testimonials" onClick={() => setMenuOpen(false)} className="py-2 text-lg">{t.nav[2]}</a>
+                <a href="index.html#contact" onClick={() => setMenuOpen(false)} className="py-2 text-lg">{t.nav[3]}</a>
+                <Button variant="default">{t.allOffers}</Button>
+                <AuthControls authed={authed} setAuthed={setAuthed} mobile />
               </div>
-              {data.description && <p className="mt-6 leading-relaxed text-zinc-700">{data.description}</p>}
-              <Button className="w-full mt-8">Skontaktuj się w sprawie oferty</Button>
-            </div>
-          </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
-    );
-  }
+    </header>
+  );
+}
 
-  // ---------- App root ----------
-  function App(){
-    const isPanel = window.location.pathname.endsWith("/panel33201");
-    return (
-      <div>
-        <Header isPanel={isPanel}/>
-        {isPanel ? <AdminPanel/> : <PublicList/>}
-        <footer className="py-10 border-t bg-white/60 backdrop-blur mt-10">
-          <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-3 text-sm text-zinc-600">
+function LangToggle({ lang, setLang }) {
+  return <Button variant="ghost" className="gap-2" onClick={() => setLang(lang === "pl" ? "en" : "pl")}> <Icon name="Languages" /> {lang.toUpperCase()}</Button>;
+}
+
+function AuthControls({ authed, setAuthed, mobile }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button onClick={() => setOpen(true)} variant={mobile ? "secondary" : "outline"} className="gap-2">
+        <Icon name={authed.logged ? "LogOut" : "LogIn"} /> {authed.logged ? "Wyloguj" : "Zaloguj"}
+      </Button>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{authed.logged ? "Wylogowanie" : "Logowanie / Rejestracja"}</DialogTitle>
+        </DialogHeader>
+        {authed.logged ? (<Button onClick={() => setAuthed({ logged: false, name: "" })} className="w-full">Potwierdź wylogowanie</Button>) : (<AuthForm onSuccess={(name) => { setAuthed({ logged: true, name }); setOpen(false); }} />)}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AuthForm({ onSuccess }) {
+  const [loading, setLoading] = useState(false);
+  const handle = (e) => { e.preventDefault(); setLoading(true); setTimeout(() => { setLoading(false); onSuccess(e.target.name.value || "Użytkownik"); }, 800); };
+  return (
+    <form onSubmit={handle} className="space-y-3">
+      <Input name="name" placeholder="Imię i nazwisko" required />
+      <Input name="email" type="email" placeholder="Email" required />
+      <Input name="pass" type="password" placeholder="Hasło" required />
+      <div className="flex items-center justify-between text-xs text-zinc-500"><label className="flex items-center gap-2"><Switch /> Zapamiętaj mnie</label><a href="#" className="underline">Przypomnij hasło</a></div>
+      <Button type="submit" className="w-full" disabled={loading}>{loading ? <Icon name="Loader2" className="animate-spin" /> : <><Icon name="UserPlus" className="mr-2" /> Zaloguj / Zarejestruj</>}</Button>
+    </form>
+  );
+}
+
+function OfferCard({ data, fav, onFav }) {
+  return (
+    <div className="relative group">
+      <Card className="overflow-hidden rounded-3xl border-zinc-200/70 bg-white/80 backdrop-blur-xl shadow-[0_20px_60px_-25px_rgba(0,0,0,0.15)] transition-transform duration-300 group-hover:-translate-y-1">
+        <div className="relative h-56">
+          <img src={data.image} alt={data.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          <button onClick={onFav} className={cn("absolute top-3 right-3 p-2 rounded-xl transition-all", fav ? "bg-red-500 text-white" : "bg-white/80 text-zinc-800 hover:bg-white")}> <Icon name="Heart" className={cn("h-4 w-4", fav && "fill-current")} /> </button>
+          <Badge className="absolute left-3 top-3 bg-black/70 text-white backdrop-blur">{data.type}</Badge>
+        </div>
+        <CardHeader>
+          <CardTitle className="text-xl">{data.title}</CardTitle>
+          <div className="flex items-center gap-2 text-zinc-500 text-sm"><Icon name="MapPin" /> {data.city} • {data.area} m² • {data.rooms} pokoje</div>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between">
+          <div className="text-2xl font-semibold">{currency(data.price)}</div>
+          <Button variant="outline" className="rounded-xl">Szczegóły</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Pełnoekranowy modal
+function OfferDetailsModal({ offer, onClose }) {
+  useEffect(() => { document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = 'unset'; }; }, []);
+  return (
+    <div className="fixed inset-0 z-[100] bg-white animate-fade-in" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="relative w-full h-full overflow-hidden flex flex-col md:flex-row">
+        <button onClick={onClose} className="absolute top-4 right-4 z-10 p-2 rounded-full bg-zinc-100 text-zinc-800 hover:bg-zinc-200 transition-colors">
+          <Icon name="X" className="h-6 w-6" />
+        </button>
+        <div className="w-full md:w-1/2 h-1/2 md:h-full">
+          <img src={offer.image} alt={offer.title} className="h-full w-full object-cover" />
+        </div>
+        <div className="w-full md:w-1/2 p-8 overflow-y-auto">
+          <Badge>{offer.type}</Badge>
+          <h2 className="text-3xl font-bold mt-2">{offer.title}</h2>
+          <div className="flex items-center gap-2 text-zinc-500 mt-1"><Icon name="MapPin" /> {offer.city}</div>
+          <div className="text-4xl font-bold my-6">{currency(offer.price)}</div>
+          <div className="grid grid-cols-2 gap-4 text-base border-t pt-6">
+            <div className="font-semibold text-zinc-600">Metraż:</div> <div>{offer.area} m²</div>
+            <div className="font-semibold text-zinc-600">Pokoje:</div> <div>{offer.rooms}</div>
+            <div className="font-semibold text-zinc-600">Piętro:</div> <div>{offer.floor}</div>
+            {offer.terrace && <><div className="font-semibold text-zinc-600">Taras:</div> <div>Tak</div></>}
+            {offer.garden && <><div className="font-semibold text-zinc-600">Ogród:</div> <div>Tak</div></>}
+          </div>
+          <p className="mt-6 text-zinc-700 leading-relaxed border-t pt-6">
+            Tutaj znajdzie się szczegółowy opis nieruchomości.
+          </p>
+          <Button size="lg" className="w-full mt-8 rounded-xl">Skontaktuj się w sprawie oferty</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ALL OFFERS (POBIERANIE Z API + FILTRY) ----------
+function AllOffers({ t, favs, toggleFav, onBack }) {
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [query, setQuery] = useState("");
+  const [city, setCity] = useState("");
+  const [type, setType] = useState("");
+  const [rooms, setRooms] = useState(0);
+  const [area, setArea] = useState([30, 160]);
+  const [price, setPrice] = useState([300000, 1500000]);
+  const [sort, setSort] = useState("newest");
+  const [grid, setGrid] = useState(true);
+  const [page, setPage] = useState(1);
+  const [selectedOffer, setSelectedOffer] = useState(null);
+  const pageSize = 9;
+
+  // pobranie danych
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    fetch(API_URL)
+      .then(r => { if (!r.ok) throw new Error("Błąd pobierania"); return r.json(); })
+      .then(data => { if (mounted) { setListings(Array.isArray(data) ? data : []); setError(""); } })
+      .catch(err => { if (mounted) setError("Nie udało się pobrać ogłoszeń."); console.error(err); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
+  }, []);
+
+  const cities = useMemo(() => Array.from(new Set(listings.map(x => x.city))).filter(Boolean), [listings]);
+  const types  = useMemo(() => Array.from(new Set(listings.map(x => x.type))).filter(Boolean), [listings]);
+
+  const filtered = useMemo(() => {
+    let out = listings.filter((x) =>
+      (x.title || "").toLowerCase().includes(query.toLowerCase()) &&
+      (!city || x.city === city) &&
+      (!type || x.type === type) &&
+      (rooms ? Number(x.rooms) >= Number(rooms) : true) &&
+      Number(x.area) >= area[0] && Number(x.area) <= area[1] &&
+      Number(x.price) >= price[0] && Number(x.price) <= price[1]
+    );
+    if (sort === "cheapest") out.sort((a, b) => Number(a.price) - Number(b.price));
+    else if (sort === "newest") out.sort((a, b) => (b.createdAt || b.id || 0) - (a.createdAt || a.id || 0));
+    else if (sort === "featured") out.sort((a,b) => (b.terrace ? 1:0) - (a.terrace ? 1:0) || (b.createdAt || 0) - (a.createdAt || 0));
+    return out;
+  }, [listings, query, city, type, rooms, area, price, sort]);
+
+  const visible = filtered.slice(0, page * pageSize);
+  const canLoad = visible.length < filtered.length;
+
+  useEffect(() => {
+    const onScroll = () => {
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 200 && canLoad) setPage((p) => p + 1);
+    };
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [canLoad, filtered]);
+
+  const resetFilters = () => {
+    setQuery(""); setCity(""); setType(""); setRooms(0);
+    setArea([30,160]); setPrice([300000,1500000]); setSort("newest"); setPage(1);
+  };
+
+  return (
+    <>
+      <section className="w-full py-10 min-h-screen">
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <img src="https://i.imgur.com/UwnwhuV.png" className="h-10 w-10" />
-              <div>
-                <div className="font-semibold">© {new Date().getFullYear()} Centrum nieruchomości</div>
-                <div className="text-xs">Zacharska Klaudia</div>
-              </div>
+              <Button variant="outline" onClick={onBack} className="rounded-xl"><Icon name="ChevronLeft" className="mr-2" />Wróć</Button>
+              <h2 className="text-2xl md:text-3xl font-semibold tracking-tight">{t.allOffers}</h2>
+              <Badge variant="secondary">{filtered.length}</Badge>
+            </div>
+            <div className="hidden md:flex items-center gap-2">
+              <Button variant={grid ? "default" : "outline"} onClick={() => setGrid(true)} className="rounded-xl">{t.filters.grid}</Button>
+              <Button variant={!grid ? "default" : "outline"} onClick={() => setGrid(false)} className="rounded-xl">{t.filters.list}</Button>
             </div>
           </div>
-        </footer>
-      </div>
-    );
-  }
 
-  ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-  </script>
+          <div className="mt-6 grid md:grid-cols-12 gap-3 p-4 rounded-2xl bg-white/70 backdrop-blur border shadow-sm">
+            <div className="md:col-span-3"><Input placeholder="Szukaj..." value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} /></div>
+
+            <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={city} onChange={(e) => { setCity(e.target.value); setPage(1); }}>
+              <option value="">{t.filters.location}</option>
+              {cities.map((c) => (<option key={c} value={c}>{c}</option>))}
+            </select>
+
+            <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}>
+              <option value="">{t.filters.type}</option>
+              {types.map((tp) => (<option key={tp} value={tp}>{tp}</option>))}
+            </select>
+
+            <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={rooms} onChange={(e) => { setRooms(Number(e.target.value)); setPage(1); }}>
+              <option value={0}>{t.filters.rooms}</option>{[1,2,3,4,5].map((r) => (<option key={r} value={r}>{r}+</option>))}
+            </select>
+
+            <select className="md:col-span-2 rounded-xl border p-2 text-sm bg-white focus:ring-2 focus:ring-blue-500" value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="newest">{t.filters.newest}</option>
+              <option value="cheapest">{t.filters.cheapest}</option>
+              <option value="featured">{t.filters.featured}</option>
+            </select>
+
+            <div className="md:col-span-6 px-2">
+              <label className="text-xs text-zinc-500">{t.filters.area}: {area[0]}–{area[1]} m²</label>
+              <Slider defaultValue={area} min={20} max={200} step={5} onValueChange={(v) => { setArea(v); setPage(1); }} />
+            </div>
+            <div className="md:col-span-6 px-2">
+              <label className="text-xs text-zinc-500">{t.filters.price}: {currency(price[0])} – {currency(price[1])}</label>
+              <Slider defaultValue={price} min={200000} max={2000000} step={10000} onValueChange={(v) => { setPrice(v); setPage(1); }} />
+            </div>
+
+            <div className="md:col-span-12 flex justify-end"><Button variant="ghost" onClick={resetFilters} className="rounded-xl"><Icon name="X" className="mr-2" />{t.filters.clear}</Button></div>
+          </div>
+
+          {loading && (
+            <div className="mt-6 grid md:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-80 rounded-3xl" />)}
+            </div>
+          )}
+          {!loading && error && <div className="mt-6 p-4 rounded-xl bg-red-50 text-red-700 text-center">{error}</div>}
+
+          {!loading && !error && (
+            <div className={cn("mt-6 grid gap-4", grid ? "md:grid-cols-3" : "grid-cols-1")}> 
+              {visible.map((item) => (
+                <div key={item.id} className="cursor-pointer" onClick={() => setSelectedOffer(item)}>
+                  {grid ? (
+                    <OfferCard data={item} fav={favs.includes(item.id)} onFav={(e) => { e.stopPropagation(); toggleFav(item.id); }} />
+                  ) : (
+                    <div className="rounded-2xl overflow-hidden border bg-white/70 backdrop-blur shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex gap-4 p-3">
+                        <img src={item.image} className="h-28 w-40 rounded-xl object-cover" alt={item.title}/>
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h4 className="font-semibold">{item.title}</h4>
+                              <div className="text-sm text-zinc-500">{item.city} • {item.area} m² • {item.rooms} pokoje • piętro {item.floor}</div>
+                            </div>
+                            <div className="text-xl font-semibold">{currency(item.price)}</div>
+                          </div>
+                          <div className="mt-2 flex items-center gap-2">
+                            {item.terrace && <Badge>Taras</Badge>}
+                            {item.garden && <Badge variant="secondary">Ogród</Badge>}
+                            <button onClick={(e) => { e.stopPropagation(); toggleFav(item.id); }} className={cn("ml-auto p-2 rounded-xl", favs.includes(item.id) ? "bg-red-500 text-white" : "bg-white text-zinc-700 border hover:bg-zinc-100")}> 
+                              <Icon name="Heart" className={cn("h-4 w-4", favs.includes(item.id) && "fill-current")} /> 
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!loading && !error && canLoad && <div className="mt-6 grid md:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-80 rounded-3xl" />)}</div>}
+          {!loading && !error && !filtered.length && <div className="mt-6 p-4 rounded-xl bg-blue-50 text-blue-700 text-center">Brak wyników dla wybranych filtrów.</div>}
+        </div>
+      </section>
+
+      {selectedOffer && <OfferDetailsModal offer={selectedOffer} onClose={() => setSelectedOffer(null)} />}
+    </>
+  );
+}
+
+// ---------- FOOTER ----------
+function Footer() {
+  return (
+    <footer className="py-10 border-t bg-white/60 backdrop-blur">
+      <div className="mx-auto max-w-7xl px-4 flex flex-col items-center text-center gap-4 text-sm text-zinc-600">
+        <div className="flex items-center gap-3">
+          <img src="https://i.imgur.com/UwnwhuV.png" alt="Centrum nieruchomości Logo" className="h-10 w-10" />
+          <div>
+            <div className="font-semibold tracking-tight">© {new Date().getFullYear()} Centrum nieruchomości</div>
+            <div className="text-xs text-zinc-600">Zacharska Klaudia</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4"><a href="#" className="hover:text-blue-600">Polityka prywatności</a><a href="#" className="hover:text-blue-600">RODO</a></div>
+      </div>
+    </footer>
+  );
+}
+
+const container = document.getElementById('root');
+const root = ReactDOM.createRoot(container);
+root.render(<App />);
+</script>
+
 </body>
 </html>
