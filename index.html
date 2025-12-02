@@ -13,7 +13,6 @@
   <meta property="og:image" content="https://i.imgur.com/CcxoJP0.png" />
   <meta name="theme-color" content="#2563eb" />
 
-  <!-- JSON-LD -->
   <script type="application/ld+json">
   {
     "@context":"https://schema.org",
@@ -31,14 +30,16 @@
   }
   </script>
 
-  <!-- Perf: preconnect fonts -->
+  <!-- Perf -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" defer></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" defer></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js" defer></script>
+
+  <!-- WAŻNE: bez defer (żeby text/babel działał) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -305,7 +306,6 @@
         });
       };
 
-      // lock background scroll when drawer open
       useEffect(() => {
         document.body.classList.toggle("lock", menuOpen);
       }, [menuOpen]);
@@ -323,7 +323,6 @@
             <Contact t={t}/>
           </main>
           <Footer/>
-
           <BackToTop/>
           <StickyMobileCTA t={t}/>
           <ListingModal item={selected} onClose={() => setSelected(null)} t={t} favs={favs} toggleFav={toggleFav}/>
@@ -428,9 +427,11 @@
                 <a href="oferty.html" className="mt-2">
                   <Button variant="secondary" className="w-full rounded-xl">{t.allOffers}</Button>
                 </a>
-                <Button variant="outline" className="w-full rounded-xl mt-2" onClick={() => setMenuOpen(false)}>
-                  {t.cta}
-                </Button>
+                <a href="#contact" onClick={() => setMenuOpen(false)}>
+                  <Button variant="outline" className="w-full rounded-xl mt-2">
+                    {t.cta}
+                  </Button>
+                </a>
               </div>
             </aside>
           </div>
@@ -450,8 +451,7 @@
               </div>
 
               <h1 className="text-zinc-900 text-4xl md:text-6xl font-semibold tracking-tight leading-tight">
-                {t.heroTitle.split(" ").slice(0,2).join(" ")}{" "}
-                <span className="text-blue-600">{t.heroTitle.split(" ").slice(2).join(" ")}</span>
+                Znajdź swoje <span className="text-blue-600">wymarzone miejsce</span> z nami
               </h1>
 
               <p className="text-lg text-zinc-600 max-w-xl mx-auto lg:mx-0">
